@@ -48,6 +48,14 @@ export interface KnownAssistantContext {
 
   // Scorers/Judges
   selectedScorerName?: string;
+
+  // Custom trace view authoring (rides in context invisibly; not rendered as a
+  // tag). Lets MLflow Assistant build/modify the experiment's custom trace view.
+  customViewAuthoring?: {
+    guide: string;
+    currentTemplate: string | null;
+    traceSample: string;
+  };
 }
 
 /** All known context keys */

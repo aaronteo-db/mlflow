@@ -7,6 +7,7 @@ import { ModelTraceExplorerDetailView } from './ModelTraceExplorerDetailView';
 import { useModelTraceExplorerViewState } from './ModelTraceExplorerViewStateContext';
 import { ModelTraceExplorerSummaryView } from './summary-view/ModelTraceExplorerSummaryView';
 import { ModelTraceExplorerLinkedPromptsView } from './linked-prompts/ModelTraceExplorerLinkedPromptsView';
+import { ModelTraceExplorerCustomView } from './custom-view/ModelTraceExplorerCustomView';
 
 export const ModelTraceExplorerContent = ({
   modelTraceInfo,
@@ -24,7 +25,7 @@ export const ModelTraceExplorerContent = ({
 
   const handleValueChange = useCallback(
     (value: string) => {
-      setActiveView(value as 'summary' | 'detail');
+      setActiveView(value as 'summary' | 'detail' | 'prompts' | 'custom');
     },
     [
       // prettier-ignore
@@ -70,6 +71,12 @@ export const ModelTraceExplorerContent = ({
             description="Label for the linked prompts view tab in the model trace explorer"
           />
         </Tabs.Trigger>
+        <Tabs.Trigger value="custom">
+          <FormattedMessage
+            defaultMessage="Custom View"
+            description="Label for the custom view tab in the model trace explorer"
+          />
+        </Tabs.Trigger>
       </Tabs.List>
       <Tabs.Content
         value="summary"
@@ -108,6 +115,22 @@ export const ModelTraceExplorerContent = ({
         }}
       >
         <ModelTraceExplorerLinkedPromptsView modelTraceInfo={modelTraceInfo} />
+      </Tabs.Content>
+      <Tabs.Content
+        value="custom"
+        mountMode="preserve"
+        css={{
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          minHeight: 0,
+          // With mountMode="preserve" the panel stays mounted when inactive
+          '&[hidden]': {
+            display: 'none',
+          },
+        }}
+      >
+        <ModelTraceExplorerCustomView modelTraceInfo={modelTraceInfo} />
       </Tabs.Content>
     </Tabs.Root>
   );
