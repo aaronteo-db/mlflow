@@ -19,6 +19,7 @@ import { StatCardApi } from '../StatCard';
 import { TimelineChartApi } from '../TimelineChart';
 import { TreeNodeApi } from '../TreeNode';
 import { TreeViewApi } from '../TreeView';
+import { SOURCE_MARKER_KEY, isKnownSource, isSourceMarker } from '../resolveTemplate';
 
 // Per-component prop schemas for the custom catalog components. The basic
 // catalog components (Text/Row/Column) are intentionally absent: they're
@@ -69,6 +70,23 @@ const toMessageArray = (raw: unknown): RawMessage[] | undefined => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
+// Recursively collects every `$source` marker name found in a value, so a
+// template's data bindings can be validated without running the strict per-prop
+// schema (which expects concrete arrays/strings, not markers).
+const collectSourceNames = (value: unknown, out: string[]): void => {
+  if (isSourceMarker(value)) {
+    out.push(value[SOURCE_MARKER_KEY]);
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry) => collectSourceNames(entry, out));
+    return;
+  }
+  if (isRecord(value)) {
+    Object.values(value).forEach((entry) => collectSourceNames(entry, out));
+  }
+};
+
 // Validates the props of a single component against the custom catalog schema.
 // `id` and `component` are stripped first since the per-component schemas (like
 // the renderer) only describe the component's own props.
@@ -80,13 +98,28 @@ const validateComponentProps = (component: Record<string, unknown>): string | un
   if (component.id === undefined || component.id === null || component.id === '') {
     return `Component "${componentName}" is missing a non-empty "id".`;
   }
+  const { id: _id, component: _component, ...props } = component;
+
+  // Templates bind data via `$source` markers instead of inlining it. When a
+  // component carries markers we validate the marker names (the host binds them
+  // per trace) and skip the strict prop schema, which would reject a marker
+  // where it expects a concrete array/string.
+  const sourceNames: string[] = [];
+  collectSourceNames(props, sourceNames);
+  if (sourceNames.length > 0) {
+    const unknown = sourceNames.find((name) => !isKnownSource(name));
+    if (unknown) {
+      return `Component "${String(component.id)}" (${componentName}) references an unknown data source "${unknown}".`;
+    }
+    return undefined;
+  }
+
   const schema = COMPONENT_SCHEMAS[componentName];
   if (!schema) {
     // Basic catalog component (Text/Row/Column) or unknown — let it pass; the
     // renderer/binder is the source of truth for these.
     return undefined;
   }
-  const { id: _id, component: _component, ...props } = component;
   const result = schema.safeParse(props);
   if (!result.success) {
     const detail = result.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
@@ -146,7 +179,10 @@ export const validateAndPrepareMessages = (
           error: `Invalid updateComponents message: ${parsed.error.issues.map((i) => i.message).join('; ')}`,
         };
       }
-      const components = (payload?.components ?? []) as Record<string, unknown>[];
+      const components = ((payload as Record<string, unknown> | undefined)?.components ?? []) as Record<
+        string,
+        unknown
+      >[];
       for (const component of components) {
         if (!isRecord(component)) {
           return { ok: false, error: 'A component entry is not a JSON object.' };

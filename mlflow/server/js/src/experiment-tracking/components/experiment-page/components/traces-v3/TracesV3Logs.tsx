@@ -83,6 +83,7 @@ import {
   useRunJudgesOnTracesConfiguration,
 } from '../../../../pages/experiment-scorers/hooks/useRunScorerInTracesViewConfiguration';
 import { IssueDetectionModal } from './IssueDetectionModal';
+import { ExperimentCustomViewProvider } from './ExperimentCustomViewProvider';
 import { useCountInfo } from './hooks/useCountInfo';
 import { useAssessmentCountMetrics } from './hooks/useAssessmentCountMetrics';
 
@@ -573,6 +574,7 @@ const TracesV3LogsImpl = React.memo(
           getTrace={getTrace}
           isGroupedBySession={forceGroupBySession || isGroupedBySession}
         >
+          <ExperimentCustomViewProvider experimentId={singleExperimentId}>
           <div
             css={{
               overflow: 'hidden',
@@ -622,6 +624,7 @@ const TracesV3LogsImpl = React.memo(
               defaultGroupBySession={forceGroupBySession || isGroupedBySession}
             />
           )}
+          </ExperimentCustomViewProvider>
         </GenAITracesTableProvider>
       </ModelTraceExplorerContextProvider>
     );

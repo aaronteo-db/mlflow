@@ -34,6 +34,9 @@ export type GenerateParams = {
   surfaceId: string;
   catalogId: string;
   data: AgentTraceData;
+  // When present, the model edits this existing dashboard spec (single surface)
+  // instead of generating a fresh one.
+  previousTemplate?: A2uiMessage[];
 };
 
 /**
@@ -44,8 +47,8 @@ export type GenerateParams = {
  */
 export const useAgentDashboard = () => {
   const mutation = useMutation<A2uiMessage[], Error, GenerateParams>({
-    mutationFn: async ({ instruction, endpointName, surfaceId, catalogId, data }) => {
-      const messages = buildAgentMessages({ instruction, data });
+    mutationFn: async ({ instruction, endpointName, surfaceId, catalogId, data, previousTemplate }) => {
+      const messages = buildAgentMessages({ instruction, data, previousTemplate });
 
       // Bound the request so a slow/hung gateway surfaces an error instead of
       // spinning indefinitely. Large traces make the prompt big and generation
