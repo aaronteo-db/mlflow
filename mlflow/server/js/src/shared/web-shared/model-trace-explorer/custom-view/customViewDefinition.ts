@@ -10,23 +10,19 @@ export const CUSTOM_VIEW_DEFINITION_VERSION = 1 as const;
 // A trace-agnostic recipe for one dashboard panel. The definition NEVER stores
 // bound trace data — only how to (re)build a panel for whichever trace is open:
 //
-//  - 'predefined' panels reference a MESSAGE_SETS builder by id; the host re-runs
-//    that builder with the current trace's data.
 //  - 'agent' panels carry an LLM-generated `template` whose data is referenced via
 //    `$source` markers; the host re-binds it per trace with no further LLM call.
 //    When `requiresRegeneration` is true the template contains trace-specific
 //    narrative the host cannot re-bind, so the LLM is re-called per trace.
-export type CustomViewPanel =
-  | { id: string; kind: 'predefined'; setId: string; label: string }
-  | {
-      id: string;
-      kind: 'agent';
-      instruction: string;
-      endpointName?: string;
-      template: A2uiMessage[];
-      requiresRegeneration: boolean;
-      label: string;
-    };
+export type CustomViewPanel = {
+  id: string;
+  kind: 'agent';
+  instruction: string;
+  endpointName?: string;
+  template: A2uiMessage[];
+  requiresRegeneration: boolean;
+  label: string;
+};
 
 export type CustomViewDefinition = {
   version: typeof CUSTOM_VIEW_DEFINITION_VERSION;
@@ -54,9 +50,6 @@ export const parseCustomViewDefinition = (value: unknown): CustomViewDefinition 
       return false;
     }
     const entry = panel as CustomViewPanel;
-    if (entry.kind === 'predefined') {
-      return typeof entry.id === 'string' && typeof entry.setId === 'string';
-    }
     if (entry.kind === 'agent') {
       return typeof entry.id === 'string' && Array.isArray(entry.template);
     }

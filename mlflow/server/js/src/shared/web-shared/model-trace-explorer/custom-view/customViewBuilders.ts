@@ -99,8 +99,8 @@ export type CustomViewData = {
   toolRows: TableRow[];
   timelineRows: TimelineRow[];
   treeNodes: TreeNodeData[];
-  // The span hierarchy (roots), used by the predefined tree/trajectory builders
-  // to emit TreeNode components with per-span side panels.
+  // The span hierarchy (roots), used to materialize an agent template's span
+  // tree into TreeNode components with per-span side panels.
   treeRoots: ModelTraceSpanNode[];
   assessmentItems: AssessmentBoardItem[];
   firstToolIO?: FirstToolIO;
@@ -299,9 +299,9 @@ const getAssessmentSentiment = ({ value, error }: AgentAssessment): AssessmentSe
   return 'neutral';
 };
 
-// Shapes the trace's real assessments into AssessmentBoard items for the
-// predefined "LLM-as-a-judge" view: category header, verdict value, rationale,
-// and a derived sentiment that drives the green/red coloring.
+// Shapes the trace's real assessments into AssessmentBoard items (category
+// header, verdict value, rationale, and a derived sentiment that drives the
+// green/red coloring) for binding into an agent template's AssessmentBoard.
 export const getAssessmentBoardItems = (assessments: AgentAssessment[]): AssessmentBoardItem[] =>
   assessments.map((assessment) => {
     const hasError = Boolean(assessment.error);
@@ -317,16 +317,6 @@ export const getAssessmentBoardItems = (assessments: AgentAssessment[]): Assessm
     };
   });
 
-// A message set is a named, self-contained group of A2UI messages that renders
-// one block into its own surface. Add a new entry to MESSAGE_SETS to offer
-// another option in the dropdown. `build` receives the target surfaceId so the
-// same set can be appended multiple times into independent surfaces.
-export type MessageSet = {
-  id: string;
-  label: string;
-  build: (surfaceId: string, data: CustomViewData) => A2uiMessage[];
-};
-
 export const createSurfaceMessage = (surfaceId: string): A2uiMessage => ({
   version: 'v0.9',
   createSurface: {
@@ -335,130 +325,6 @@ export const createSurfaceMessage = (surfaceId: string): A2uiMessage => ({
     sendDataModel: true,
   },
 });
-
-// Trace-level summary statistics derived from `modelTraceInfo`. The StatCard
-// values are bound to data-model paths populated by the `updateDataModel`
-// message built from the real metrics.
-const buildTraceSummaryMessages = (surfaceId: string, { metrics }: CustomViewData): A2uiMessage[] => [
-  createSurfaceMessage(surfaceId),
-  {
-    version: 'v0.9',
-    updateComponents: {
-      surfaceId,
-      components: [
-        {
-          id: 'root',
-          component: 'Row',
-          children: ['stat-status', 'stat-latency', 'stat-tokens', 'stat-assessments'],
-          align: 'stretch',
-        },
-        { id: 'stat-status', component: 'StatCard', value: { path: '/status' }, label: 'Status', icon: 'checkCircle', tone: 'success' },
-        { id: 'stat-latency', component: 'StatCard', value: { path: '/latency' }, label: 'Latency', icon: 'clock', tone: 'warning' },
-        { id: 'stat-tokens', component: 'StatCard', value: { path: '/totalTokens' }, label: 'Total Tokens', icon: 'hash', tone: 'info' },
-        { id: 'stat-assessments', component: 'StatCard', value: { path: '/assessments' }, label: 'Assessments', icon: 'checklist', tone: 'success' },
-      ],
-    },
-  },
-  { version: 'v0.9', updateDataModel: { surfaceId, value: metrics } },
-];
-
-// Same trace-summary stats, but grouped inside a basic `Card`.
-const buildTraceSummaryCardMessages = (surfaceId: string, { metrics }: CustomViewData): A2uiMessage[] => [
-  createSurfaceMessage(surfaceId),
-  {
-    version: 'v0.9',
-    updateComponents: {
-      surfaceId,
-      components: [
-        { id: 'root', component: 'Card', child: 'card-body' },
-        { id: 'card-body', component: 'Column', children: ['card-heading', 'card-stats'] },
-        { id: 'card-heading', component: 'Text', text: 'Trace Summary', variant: 'h4' },
-        {
-          id: 'card-stats',
-          component: 'Row',
-          children: ['card-stat-status', 'card-stat-latency', 'card-stat-tokens', 'card-stat-assessments'],
-          align: 'stretch',
-        },
-        { id: 'card-stat-status', component: 'StatCard', value: { path: '/status' }, label: 'Status', icon: 'checkCircle', tone: 'success' },
-        { id: 'card-stat-latency', component: 'StatCard', value: { path: '/latency' }, label: 'Latency', icon: 'clock', tone: 'warning' },
-        { id: 'card-stat-tokens', component: 'StatCard', value: { path: '/totalTokens' }, label: 'Total Tokens', icon: 'hash', tone: 'info' },
-        { id: 'card-stat-assessments', component: 'StatCard', value: { path: '/assessments' }, label: 'Assessments', icon: 'checklist', tone: 'success' },
-      ],
-    },
-  },
-  { version: 'v0.9', updateDataModel: { surfaceId, value: metrics } },
-];
-
-// Demonstrates the custom MediaRenderer component.
-const DEMO_IMAGE_URL = 'https://cdn.britannica.com/77/170477-050-1C747EE3/Laptop-computer.jpg';
-
-const buildMediaDemoMessages = (surfaceId: string): A2uiMessage[] => [
-  createSurfaceMessage(surfaceId),
-  {
-    version: 'v0.9',
-    updateComponents: {
-      surfaceId,
-      components: [
-        { id: 'root', component: 'Card', child: 'image-col' },
-        { id: 'image-col', component: 'Column', children: ['demo-image', 'image-caption'] },
-        { id: 'demo-image', component: 'MediaRenderer', url: DEMO_IMAGE_URL, alt: 'A2UI MediaRenderer component demo' },
-        {
-          id: 'image-caption',
-          component: 'Text',
-          text: 'Rendered with the custom A2UI MediaRenderer component (URL or mlflow-attachment:// blob).',
-        },
-      ],
-    },
-  },
-];
-
-// Per-tool performance table derived from the trace's TOOL spans.
-const buildToolPerformanceMessages = (surfaceId: string, { toolRows }: CustomViewData): A2uiMessage[] => [
-  createSurfaceMessage(surfaceId),
-  {
-    version: 'v0.9',
-    updateComponents: {
-      surfaceId,
-      components: [
-        {
-          id: 'root',
-          component: 'DataTable',
-          title: 'Tool Performance Summary',
-          icon: 'wrench',
-          columns: [
-            { label: 'Tool', align: 'left' },
-            { label: 'Calls', align: 'center' },
-            { label: 'Success', align: 'center' },
-            { label: 'Latency (AVG)', align: 'center' },
-          ],
-          rows: toolRows,
-          emptyMessage: 'No tool calls in this trace.',
-        },
-      ],
-    },
-  },
-];
-
-// Gantt-style breakdown of the trace's spans.
-const buildTraceBreakdownMessages = (surfaceId: string, { timelineRows }: CustomViewData): A2uiMessage[] => [
-  createSurfaceMessage(surfaceId),
-  {
-    version: 'v0.9',
-    updateComponents: {
-      surfaceId,
-      components: [
-        {
-          id: 'root',
-          component: 'TimelineChart',
-          title: 'Trace Breakdown',
-          icon: 'clock',
-          rows: timelineRows,
-          emptyMessage: 'No spans in this trace.',
-        },
-      ],
-    },
-  },
-];
 
 // Returns the span's "real" (non-`mlflow.`-prefixed) attributes, mirroring the
 // Details & Timeline Attributes tab.
@@ -537,10 +403,6 @@ export const buildSpanPanelComponents = (
 export const spanName = (span: ModelTraceSpanNode): string =>
   typeof span.title === 'string' ? span.title : String(span.title ?? 'span');
 
-// Side-panel directives reused across the predefined tree builders.
-const TRACE_TREE_PANEL_ITEMS: PanelItem[] = [{ type: 'input' }, { type: 'output' }, { type: 'feedback' }];
-const SPAN_IO_PANEL_ITEMS: PanelItem[] = [{ type: 'input' }, { type: 'output' }];
-
 // Recursively emits TreeNode components for a span AND its descendants into
 // `sink` (preserving the span hierarchy), attaching the given side-panel
 // `panelItems` to each node, and returns the span's node id. `state.counter`
@@ -570,206 +432,3 @@ export const buildSpanNodeComponents = (
   });
   return nodeId;
 };
-
-// A 1:1 span tree built from first-class TreeNode components.
-const buildTraceTreeMessages = (surfaceId: string, { treeRoots }: CustomViewData): A2uiMessage[] => {
-  const components: Record<string, unknown>[] = [];
-  const state = { counter: 0 };
-  const rootChildIds = treeRoots.map((span) =>
-    buildSpanNodeComponents(span, components, { panelItems: TRACE_TREE_PANEL_ITEMS, idPrefix: 'tn', state }),
-  );
-
-  return [
-    createSurfaceMessage(surfaceId),
-    {
-      version: 'v0.9',
-      updateComponents: {
-        surfaceId,
-        components: [
-          { id: 'root', component: 'TreeView', title: 'Trace Tree', children: rootChildIds, emptyMessage: 'No spans to display.' },
-          ...components,
-        ],
-      },
-    },
-  ];
-};
-
-// Demonstrates the GROUPED key-action / milestone use case.
-const buildTrajectoryDemoMessages = (surfaceId: string, { treeRoots }: CustomViewData): A2uiMessage[] => {
-  const milestones = treeRoots.slice(0, 6);
-  if (milestones.length === 0) {
-    return [
-      createSurfaceMessage(surfaceId),
-      {
-        version: 'v0.9',
-        updateComponents: {
-          surfaceId,
-          components: [{ id: 'root', component: 'Text', text: 'No spans to summarize in this trace.' }],
-        },
-      },
-    ];
-  }
-
-  const components: Record<string, unknown>[] = [];
-  const milestoneIds: string[] = [];
-  const state = { counter: 0 };
-
-  milestones.forEach((span, index) => {
-    const milestoneId = `ms-${index + 1}-node`;
-    milestoneIds.push(milestoneId);
-
-    const spanType = String(span.type ?? ModelSpanType.UNKNOWN);
-    const memberSpans = span.children && span.children.length > 0 ? span.children : [span];
-    const memberIds = memberSpans.map((member) =>
-      buildSpanNodeComponents(member, components, { panelItems: SPAN_IO_PANEL_ITEMS, idPrefix: `ms${index + 1}`, state }),
-    );
-
-    const links = memberSpans
-      .slice(0, 3)
-      .map((member) => `[${spanName(member)}](#span:${String(member.key)})`)
-      .join(', ');
-    const text = `Step ${index + 1} covers the \`${spanType}\` action **${spanName(span)}**. Key spans: ${links}.`;
-
-    components.push({
-      id: milestoneId,
-      component: 'TreeNode',
-      title: `Step ${index + 1}: ${spanName(span)}`,
-      icon: getIconTypeForSpan(span.type ?? ModelSpanType.UNKNOWN),
-      isRootSpan: !span.parentId,
-      panelItems: [{ type: 'markdown', title: 'Action summary', text }, { type: 'feedback' }],
-      children: memberIds,
-    });
-  });
-
-  return [
-    createSurfaceMessage(surfaceId),
-    {
-      version: 'v0.9',
-      updateComponents: {
-        surfaceId,
-        components: [
-          { id: 'root', component: 'TreeView', title: 'Agent Key Actions', children: milestoneIds, emptyMessage: 'No spans to summarize.' },
-          ...components,
-        ],
-      },
-    },
-  ];
-};
-
-// One AssessmentCard per LLM-as-a-judge / human assessment.
-const buildAssessmentsMessages = (surfaceId: string, { assessmentItems }: CustomViewData): A2uiMessage[] => {
-  const cardIds = assessmentItems.map((_, index) => `assessment-${index}`);
-  return [
-    createSurfaceMessage(surfaceId),
-    {
-      version: 'v0.9',
-      updateComponents: {
-        surfaceId,
-        components: [
-          {
-            id: 'root',
-            component: 'AssessmentBoard',
-            title: 'LLM-as-a-Judge Assessments',
-            icon: 'checklist',
-            children: cardIds,
-            emptyMessage: 'No assessments on this trace.',
-          },
-          ...assessmentItems.map((item, index) => ({
-            id: cardIds[index],
-            component: 'AssessmentCard',
-            name: item.name,
-            ...(item.value !== undefined ? { value: item.value } : {}),
-            ...(item.rationale !== undefined ? { rationale: item.rationale } : {}),
-            ...(item.source !== undefined ? { source: item.source } : {}),
-            sentiment: item.sentiment,
-          })),
-        ],
-      },
-    },
-  ];
-};
-
-// Two KeyValueViewers side by side (in a Row): the first tool call's input/output.
-const buildFirstToolIOMessages = (surfaceId: string, { firstToolIO }: CustomViewData): A2uiMessage[] => {
-  if (!firstToolIO || (!firstToolIO.input && !firstToolIO.output)) {
-    return [
-      createSurfaceMessage(surfaceId),
-      {
-        version: 'v0.9',
-        updateComponents: {
-          surfaceId,
-          components: [{ id: 'root', component: 'Text', text: 'No tool calls with inputs/outputs in this trace.' }],
-        },
-      },
-    ];
-  }
-
-  const components: Record<string, unknown>[] = [];
-  const children: string[] = [];
-  if (firstToolIO.input) {
-    children.push('tool-input');
-    components.push({
-      id: 'tool-input',
-      component: 'KeyValueViewer',
-      label: `Input · ${firstToolIO.input.label || 'value'}`,
-      value: firstToolIO.input.value,
-    });
-  }
-  if (firstToolIO.output) {
-    children.push('tool-output');
-    components.push({
-      id: 'tool-output',
-      component: 'KeyValueViewer',
-      label: `Output · ${firstToolIO.output.label || 'value'}`,
-      value: firstToolIO.output.value,
-    });
-  }
-
-  return [
-    createSurfaceMessage(surfaceId),
-    {
-      version: 'v0.9',
-      updateComponents: {
-        surfaceId,
-        components: [{ id: 'root', component: 'Row', children, align: 'start' }, ...components],
-      },
-    },
-  ];
-};
-
-// Demonstrates the interactive FeedbackButtons primitive.
-const buildFeedbackDemoMessages = (surfaceId: string): A2uiMessage[] => [
-  createSurfaceMessage(surfaceId),
-  { version: 'v0.9', updateDataModel: { surfaceId, path: '/feedback', value: null } },
-  {
-    version: 'v0.9',
-    updateComponents: {
-      surfaceId,
-      components: [
-        { id: 'root', component: 'Card', child: 'feedback-buttons' },
-        {
-          id: 'feedback-buttons',
-          component: 'FeedbackButtons',
-          label: 'Was this trace helpful?',
-          name: 'Trace helpfulness',
-          value: { path: '/feedback' },
-        },
-      ],
-    },
-  },
-];
-
-export const MESSAGE_SETS: MessageSet[] = [
-  { id: 'trace-summary', label: 'Show me the high level summary of this trace', build: buildTraceSummaryMessages },
-  { id: 'trace-summary-card', label: 'Show the trace summary grouped in a card', build: buildTraceSummaryCardMessages },
-  { id: 'image-demo', label: 'Show an image (MediaRenderer component demo)', build: buildMediaDemoMessages },
-  { id: 'feedback-demo', label: 'Collect thumbs up/down feedback', build: buildFeedbackDemoMessages },
-  { id: 'tool-performance', label: 'List performance summary for all tools', build: buildToolPerformanceMessages },
-  { id: 'trace-breakdown', label: 'Give me a timeline of all spans calls', build: buildTraceBreakdownMessages },
-  { id: 'trace-tree', label: 'Show me the span calls in a tree view', build: buildTraceTreeMessages },
-  { id: 'trajectory-demo', label: 'Summarize the agent as key-action milestones', build: buildTrajectoryDemoMessages },
-  { id: 'assessments', label: 'Show the LLM-as-a-judge assessments', build: buildAssessmentsMessages },
-  { id: 'first-tool-io', label: "Compare the first tool call's input and output", build: buildFirstToolIOMessages },
-];
-
-export const getMessageSet = (setId: string): MessageSet | undefined => MESSAGE_SETS.find((set) => set.id === setId);

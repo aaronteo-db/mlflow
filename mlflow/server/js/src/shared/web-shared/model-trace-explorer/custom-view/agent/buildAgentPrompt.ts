@@ -52,7 +52,12 @@ export type AgentTraceData = {
 // after generation, so the model never has to invent one.
 const PLACEHOLDER_SURFACE_ID = 'main';
 
-const CATALOG_REFERENCE = `Available components (use the "component" field with these exact names):
+// The fenced code-block tag the MLflow Assistant must wrap its A2UI spec in, so
+// the host can reliably extract the view spec from a free-form chat reply
+// without hijacking unrelated assistant responses.
+export const CUSTOM_VIEW_SPEC_FENCE = 'mlflow-custom-view';
+
+export const CATALOG_REFERENCE = `Available components (use the "component" field with these exact names):
 
 - "Row": horizontal layout. props: { "children": [<child ids>], "align"?: "start"|"center"|"end"|"stretch" }
 - "Column": vertical layout. props: { "children": [<child ids>] }
@@ -71,7 +76,7 @@ const CATALOG_REFERENCE = `Available components (use the "component" field with 
 - "AssessmentBoard": a wrapping container for AssessmentCards. props: { "title"?: <string>, "icon"?: "checklist"|"list"|"checkCircle", "children": [<AssessmentCard ids>], "emptyMessage"?: <string> }. For any request about judge results / evaluations / feedback, emit one AssessmentCard per entry in the "assessments" data and list their ids in this board's "children".
 - "FeedbackButtons": an INTERACTIVE thumbs up/down control that lets the user log feedback on the trace. props: { "label"?: <string prompt, e.g. "Was this helpful?">, "name"?: <assessment name, defaults to "User feedback">, "value"?: bind to a "/feedback/..." path via { "path": "/..." } to reflect the choice, "spanId"?: <string> }. Clicking a thumb logs an MLflow feedback assessment (thumbs up = true, thumbs down = false). Use this ONLY when the user explicitly asks to COLLECT/CAPTURE feedback or add a thumbs up/down control — never to display existing judge results (use AssessmentCard/AssessmentBoard for those).`;
 
-const SOURCES_REFERENCE = `Data binding with "$source" markers (IMPORTANT — makes the view reusable across traces):
+export const SOURCES_REFERENCE = `Data binding with "$source" markers (IMPORTANT — makes the view reusable across traces):
 
 The dashboard you generate is SAVED and reused for EVERY trace in the experiment, not just this one. So you must NOT hard-code this trace's data. Instead of inlining concrete values, reference the trace's data with a "$source" marker object; the host replaces each marker with the ACTIVE trace's data when the view is shown, with no further generation. Use these markers:
 
@@ -85,7 +90,7 @@ The dashboard you generate is SAVED and reused for EVERY trace in the experiment
 
 A view that sources ALL of its data via markers is re-bound instantly for any trace (no regeneration). It is fine to still write literal, trace-SPECIFIC narrative (e.g. a milestone markdown summary with [text](#span:<id>) deeplinks) when the user asks for a written summary; the host detects that and regenerates just that view per trace. Prefer markers wherever the data is structured (tables, timelines, metrics, span trees).`;
 
-const OUTPUT_RULES = `Output format rules (A2UI v0.9):
+export const OUTPUT_RULES = `Output format rules (A2UI v0.9):
 1. Respond with ONLY a single JSON array of message objects, wrapped in a \`\`\`json code fence. No prose before or after.
 2. EVERY message object MUST include "version": "v0.9".
 3. Each message object contains EXACTLY ONE of: "createSurface", "updateComponents", "updateDataModel".
@@ -99,7 +104,7 @@ const OUTPUT_RULES = `Output format rules (A2UI v0.9):
 11. CRITICAL — never fabricate data. Use ONLY values that appear literally in the provided trace data. Do NOT invent, estimate, or infer metrics, scores, counts, percentages, failure patterns, recommendations, or config values that are not present. In particular: this is ONE single trace (not a corpus), so never reference a number of "traces analyzed"/"low-score traces" or any cross-trace aggregate. The ONLY judge/evaluation results are the entries in "assessments" (each with name/value/rationale/source); "metrics.assessments" is merely their COUNT. There are NO retrieval scores, average scores, failure patterns, threshold/chunk-size settings, or config recommendations unless they appear verbatim in "assessments" or a span's inputs/outputs.
 12. If the requested information is not present in the provided data, do NOT make something up. Instead render a single short message stating it is unavailable (e.g. a "Text" component with "text": "No LLM judge feedback is available in this trace." as the root, or a "StatCard" with value "N/A"). It is better to say the data is unavailable than to display fabricated values.`;
 
-const EXAMPLE = `Example — a tool performance table plus a metrics row:
+export const EXAMPLE = `Example — a tool performance table plus a metrics row:
 \`\`\`json
 [
   {
@@ -133,7 +138,7 @@ const EXAMPLE = `Example — a tool performance table plus a metrics row:
 ]
 \`\`\``;
 
-const TREE_EXAMPLE = `Example — a span tree. Build a "TreeView" whose "children" are "TreeNode" ids, one TreeNode per span (reuse each span's "label"/"icon"/"hasException"/"isRootSpan" from the "treeNodes" data, and set "spanId" to its id). Keep nodes MINIMAL by default — omit "panelItems" unless the user asks to inspect spans, collect feedback, or summarize a trajectory:
+export const TREE_EXAMPLE = `Example — a span tree. Build a "TreeView" whose "children" are "TreeNode" ids, one TreeNode per span (reuse each span's "label"/"icon"/"hasException"/"isRootSpan" from the "treeNodes" data, and set "spanId" to its id). Keep nodes MINIMAL by default — omit "panelItems" unless the user asks to inspect spans, collect feedback, or summarize a trajectory:
 \`\`\`json
 [
   {
@@ -171,7 +176,7 @@ To show a span's INPUT and OUTPUT (or attributes), DO NOT emit the data yourself
 \`\`\`
 This stays tiny no matter how large the span inputs/outputs are, because the host fills in the data. Add { "type": "feedback" } to also collect a thumbs up/down per span, or { "type": "markdown", "text": "..." } for a summary.`;
 
-const MILESTONE_EXAMPLE = `Example — KEY ACTIONS / milestones that GROUP several spans. Each milestone is a span-less node (NO "spanId") with a markdown summary that deeplinks to the member spans; the member spans are its "children" (real nodes with a "spanId", each keeping its own sub-spans nested):
+export const MILESTONE_EXAMPLE = `Example — KEY ACTIONS / milestones that GROUP several spans. Each milestone is a span-less node (NO "spanId") with a markdown summary that deeplinks to the member spans; the member spans are its "children" (real nodes with a "spanId", each keeping its own sub-spans nested):
 \`\`\`json
 [
   {
@@ -192,7 +197,7 @@ const MILESTONE_EXAMPLE = `Example — KEY ACTIONS / milestones that GROUP sever
 \`\`\`
 Note: milestone nodes ("ms-*") have NO "spanId" and only a markdown summary; the real spans ("n-*") are nested as "children" and carry the "spanId" + input/output. A member span with its OWN sub-spans nests them the same way.`;
 
-const SOURCE_EXAMPLE = `Example — a REUSABLE dashboard that sources every value via "$source" markers (metrics row + tool table + span tree), so it re-binds to any trace with no regeneration:
+export const SOURCE_EXAMPLE = `Example — a REUSABLE dashboard that sources every value via "$source" markers (metrics row + tool table + span tree), so it re-binds to any trace with no regeneration:
 \`\`\`json
 [
   {
@@ -225,7 +230,7 @@ const SOURCE_EXAMPLE = `Example — a REUSABLE dashboard that sources every valu
 \`\`\`
 Note: NO concrete trace values appear in the template — only markers + static labels/columns — so the host re-binds it to whichever trace is open.`;
 
-const BINDING_EXAMPLE = `Example — extract span inputs/outputs from nodeMap into the data model, then bind them:
+export const BINDING_EXAMPLE = `Example — extract span inputs/outputs from nodeMap into the data model, then bind them:
 \`\`\`json
 [
   {
@@ -282,17 +287,11 @@ const truncateValue = (value: unknown, max = 500): unknown => {
   return str.length <= max ? value : `${str.slice(0, max)}… (truncated)`;
 };
 
-export const buildAgentMessages = ({
-  instruction,
-  data,
-  previousTemplate,
-}: {
-  instruction: string;
-  data: AgentTraceData;
-  // The current dashboard's A2UI spec (trace-agnostic template). When present,
-  // the model EDITS this single surface instead of producing a fresh one.
-  previousTemplate?: A2uiMessage[];
-}): AgentChatMessage[] => {
+// Builds the compact, capped/truncated trace snapshot embedded in the prompt so
+// the model understands what data exists (its shape), without copying concrete
+// values into the (reusable) template. Shared by Agent Mode and the Assistant
+// authoring guide.
+export const buildAgentDataSnapshot = (data: AgentTraceData): Record<string, unknown> => {
   const timeline = cap(data.timelineRows, 60);
   const tree = cap(data.treeNodes, 40);
 
@@ -308,19 +307,7 @@ export const buildAgentMessages = ({
   );
   const nodeMapTruncated = Math.max(nodeMapEntries.length - cappedEntries.length, 0);
 
-  const systemContent = [
-    'You are a UI generation assistant for the MLflow trace explorer. You turn a user request into a REUSABLE A2UI dashboard. The dashboard is saved and shown for every trace in the experiment, so it must bind to trace data via "$source" markers rather than hard-coding this trace\'s values.',
-    CATALOG_REFERENCE,
-    SOURCES_REFERENCE,
-    OUTPUT_RULES,
-    SOURCE_EXAMPLE,
-    EXAMPLE,
-    TREE_EXAMPLE,
-    MILESTONE_EXAMPLE,
-    BINDING_EXAMPLE,
-  ].join('\n\n');
-
-  const dataSnapshot = {
+  return {
     metrics: data.metrics,
     toolRows: data.toolRows,
     timelineRows: timeline.items,
@@ -334,6 +321,32 @@ export const buildAgentMessages = ({
     // ONLY evaluation/judge data available.
     assessments: data.assessments ?? [],
   };
+};
+
+export const buildAgentMessages = ({
+  instruction,
+  data,
+  previousTemplate,
+}: {
+  instruction: string;
+  data: AgentTraceData;
+  // The current dashboard's A2UI spec (trace-agnostic template). When present,
+  // the model EDITS this single surface instead of producing a fresh one.
+  previousTemplate?: A2uiMessage[];
+}): AgentChatMessage[] => {
+  const systemContent = [
+    'You are a UI generation assistant for the MLflow trace explorer. You turn a user request into a REUSABLE A2UI dashboard. The dashboard is saved and shown for every trace in the experiment, so it must bind to trace data via "$source" markers rather than hard-coding this trace\'s values.',
+    CATALOG_REFERENCE,
+    SOURCES_REFERENCE,
+    OUTPUT_RULES,
+    SOURCE_EXAMPLE,
+    EXAMPLE,
+    TREE_EXAMPLE,
+    MILESTONE_EXAMPLE,
+    BINDING_EXAMPLE,
+  ].join('\n\n');
+
+  const dataSnapshot = buildAgentDataSnapshot(data);
 
   const editingLines =
     previousTemplate && previousTemplate.length > 0
@@ -373,4 +386,23 @@ export const buildAgentMessages = ({
     { role: 'system', content: systemContent },
     { role: 'user', content: userContent },
   ];
+};
+
+// Static authoring guide handed to MLflow Assistant via page context (the
+// assistant has no built-in knowledge of A2UI or the custom view). It mirrors
+// the Agent Mode system prompt, but tells the assistant to wrap its A2UI spec in
+// the CUSTOM_VIEW_SPEC_FENCE so the host can extract it from a free-form chat
+// reply. The active trace snapshot and current view spec are delivered as
+// separate context fields (see KnownAssistantContext.customViewAuthoring).
+export const buildCustomViewAuthoringGuide = (): string => {
+  const intro = [
+    'CUSTOM TRACE VIEW AUTHORING MODE.',
+    'The user is viewing the "Custom View" tab of the MLflow trace explorer for an experiment, and wants you to BUILD or MODIFY a reusable A2UI dashboard ("custom view") for it. The dashboard is SAVED on the experiment and shown for EVERY trace, so it must bind to trace data via "$source" markers rather than hard-coding this trace\'s values.',
+    `When (and only when) the user asks you to build, change, or update the custom view, reply with the FULL A2UI message stream that satisfies the request, wrapped in a fenced code block tagged exactly \`${CUSTOM_VIEW_SPEC_FENCE}\` (NOT \`json\`). The host detects that fenced block and applies it to the view automatically. You may add a brief sentence of prose before the block, but the block must contain ONLY the JSON array. If the user is just asking a question (not requesting a view change), answer normally without the fenced block.`,
+    'Always return the COMPLETE spec for the single view (not a diff). When a "currentTemplate" is provided in the context, treat the request as a modification of THAT spec: keep everything the user did not ask to change. Use the "traceSample" in the context only to understand the data shape — do NOT copy its concrete values into the template.',
+  ].join('\n');
+
+  const fenceRule = `OUTPUT FENCE OVERRIDE: The rules above say to wrap the JSON in a \`json\` fence — for this custom-view surface, IGNORE that and wrap your final A2UI array in a \`${CUSTOM_VIEW_SPEC_FENCE}\` fence instead. The example blocks below use a generic fence only for illustration of the JSON content; your actual reply MUST use the \`${CUSTOM_VIEW_SPEC_FENCE}\` fence.`;
+
+  return [intro, CATALOG_REFERENCE, SOURCES_REFERENCE, OUTPUT_RULES, fenceRule, SOURCE_EXAMPLE, TREE_EXAMPLE, MILESTONE_EXAMPLE].join('\n\n');
 };

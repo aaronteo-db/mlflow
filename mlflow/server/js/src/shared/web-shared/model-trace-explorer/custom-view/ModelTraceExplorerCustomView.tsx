@@ -5,10 +5,9 @@ import {
   Empty,
   Input,
   PlusIcon,
-  SegmentedControlButton,
-  SegmentedControlGroup,
   SimpleSelect,
   SimpleSelectOption,
+  SparkleDoubleIcon,
   Typography,
   useDesignSystemTheme,
 } from '@databricks/design-system';
@@ -39,16 +38,16 @@ import { TreeNode } from './TreeNode';
 import { TREE_NODE_SELECTED, TreeView } from './TreeView';
 import type { AgentNode } from './agent/buildAgentPrompt';
 import { useAgentDashboard } from './agent/useAgentDashboard';
+import { validateAndPrepareMessages } from './agent/validateA2uiMessages';
+import { useCustomViewAssistantBridge } from './assistant/useCustomViewAssistantBridge';
 import {
   CUSTOM_VIEW_CATALOG_ID,
   type CustomViewData,
   type FirstToolIO,
-  MESSAGE_SETS,
   buildSpanPanelComponents,
   getAgentAssessments,
   getAssessmentBoardItems,
   getContentFields,
-  getMessageSet,
   getMetricsFromTraceInfo,
   getTimelineRowsFromNodes,
   getToolRowsFromNodeMap,
@@ -238,15 +237,18 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     return json;
   }, [nodeMap]);
 
-  const [selectedSetId, setSelectedSetId] = useState(MESSAGE_SETS[0].id);
+  // The full trace data handed to the LLM (Agent Mode) and to the Assistant
+  // bridge. Memoized so its reference is stable across renders (it only changes
+  // when the active trace's data changes).
+  const agentData = useMemo(
+    () => ({ ...viewData, nodeMap: agentNodeMap, assessments: agentAssessments }),
+    [viewData, agentNodeMap, agentAssessments],
+  );
 
-  // 'predefined' appends a canned message set; 'agent' asks an LLM to generate
-  // the (trace-agnostic) A2UI template.
-  const [viewMode, setViewMode] = useState<'predefined' | 'agent'>('predefined');
   const { data: endpoints, isLoading: endpointsLoading } = useEndpointsQuery();
   const [selectedEndpoint, setSelectedEndpoint] = useState('');
   const [instruction, setInstruction] = useState('');
-  const { generate, isLoading: agentLoading, error: agentError, reset: resetAgent } = useAgentDashboard();
+  const { generate, isLoading: agentLoading, error: agentError } = useAgentDashboard();
 
   useEffect(() => {
     if (!selectedEndpoint && endpoints.length > 0) {
@@ -276,8 +278,8 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
   const [, refreshSurfaces] = useReducer((tick: number) => tick + 1, 0);
 
   // Rebuild every panel's surface whenever the definition or the active trace
-  // changes: predefined panels re-run their builder; agent panels bind their
-  // template to the current trace (regenerating per trace only when required).
+  // changes: agent panels bind their template to the current trace
+  // (regenerating per trace only when required).
   useEffect(() => {
     if (!cv.isLoaded) {
       return;
@@ -301,9 +303,12 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
         endpointName: panel.endpointName ?? selectedEndpoint,
         surfaceId: `regen-${cacheKey}`,
         catalogId: CUSTOM_VIEW_CATALOG_ID,
-        data: { ...viewData, nodeMap: agentNodeMap, assessments: agentAssessments },
-        // Reproduce the saved structure for the new trace (with fresh narrative).
-        previousTemplate: panel.template,
+        data: agentData,
+        // NB: do NOT pass `previousTemplate` here. Span ids are random per trace,
+        // and handing the model the previous trace's template makes it echo those
+        // stale span ids instead of binding to THIS trace's nodeMap (producing a
+        // view whose nodes reference spans that don't exist in the current trace).
+        // Per-trace regeneration must be grounded only in the current trace's data.
       })
         .then((messages) => {
           regenCacheRef.current.set(cacheKey, messages);
@@ -330,12 +335,7 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       }
 
       let messages: A2uiMessage[];
-      if (panel.kind === 'predefined') {
-        const messageSet = getMessageSet(panel.setId);
-        messages = messageSet
-          ? messageSet.build(surfaceId, viewData)
-          : placeholderMessages(surfaceId, 'This view is no longer available.');
-      } else if (!panel.requiresRegeneration) {
+      if (!panel.requiresRegeneration) {
         messages = resolveTemplate(panel.template, surfaceId, viewData);
       } else {
         const cacheKey = `${traceId}::${panel.id}`;
@@ -376,11 +376,6 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cv.definition, cv.isLoaded, viewData, traceId, regenVersion, processor]);
 
-  const handleAddBlock = () => {
-    const messageSet = getMessageSet(selectedSetId) ?? MESSAGE_SETS[0];
-    cv.addPanel({ id: nextPanelId(), kind: 'predefined', setId: messageSet.id, label: messageSet.label });
-  };
-
   // Drops all cached per-trace regenerations for a panel whose template changed,
   // so other traces re-generate against the new spec instead of showing stale UI.
   const purgeRegenForPanel = (panelId: string) => {
@@ -401,6 +396,56 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     });
   };
 
+  const findAgentPanel = () =>
+    cv.definition.panels.find(
+      (entry): entry is Extract<CustomViewPanel, { kind: 'agent' }> => entry.kind === 'agent',
+    );
+
+  // Applies an already-generated, validated template to the SINGLE agent panel
+  // (creating it on first use, modifying it thereafter). Shared by Agent Mode
+  // and MLflow Assistant so both edit one shared view.
+  const applyAgentTemplate = (
+    template: A2uiMessage[],
+    { panelId, instruction: panelInstruction, endpointName }: { panelId: string; instruction: string; endpointName?: string },
+  ) => {
+    const requiresRegeneration = classifyPanelRequiresRegeneration(template);
+    // The template changed, so any cached regenerations for it are stale.
+    purgeRegenForPanel(panelId);
+    if (requiresRegeneration) {
+      // Seed the cache for the current trace so the panel renders immediately
+      // without a second LLM call.
+      regenCacheRef.current.set(`${traceId}::${panelId}`, template);
+    }
+    cv.upsertPanel({
+      id: panelId,
+      kind: 'agent',
+      instruction: panelInstruction,
+      endpointName,
+      template,
+      requiresRegeneration,
+      label: panelInstruction,
+    });
+  };
+
+  // Parses + validates a raw JSON spec (e.g. captured from an MLflow Assistant
+  // reply) into a processor-ready template. Throws a descriptive Error on failure.
+  const prepareTemplateFromJson = (jsonText: string, panelId: string): A2uiMessage[] => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch {
+      throw new Error('The assistant did not return valid JSON.');
+    }
+    const result = validateAndPrepareMessages(parsed, {
+      surfaceId: `cv-template-${panelId}`,
+      catalogId: CUSTOM_VIEW_CATALOG_ID,
+    });
+    if (!result.ok) {
+      throw new Error(result.error);
+    }
+    return result.messages;
+  };
+
   // Agent Mode uses a SINGLE surface: the first prompt creates the agent panel,
   // and every subsequent prompt MODIFIES that same panel (the model receives the
   // current spec and returns the full edited spec). So we reuse the existing
@@ -411,9 +456,7 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     if (!endpointName || !prompt) {
       return;
     }
-    const existingAgent = cv.definition.panels.find(
-      (entry): entry is Extract<CustomViewPanel, { kind: 'agent' }> => entry.kind === 'agent',
-    );
+    const existingAgent = findAgentPanel();
     const panelId = existingAgent?.id ?? nextPanelId();
     try {
       const template = await generate({
@@ -421,32 +464,39 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
         endpointName,
         surfaceId: `cv-template-${panelId}`,
         catalogId: CUSTOM_VIEW_CATALOG_ID,
-        data: { ...viewData, nodeMap: agentNodeMap, assessments: agentAssessments },
+        data: agentData,
         // Iterative edit: hand the model the current spec so it modifies it.
         previousTemplate: existingAgent?.template,
       });
-      const requiresRegeneration = classifyPanelRequiresRegeneration(template);
-      // The template changed, so any cached regenerations for it are stale.
-      purgeRegenForPanel(panelId);
-      if (requiresRegeneration) {
-        // Seed the cache for the current trace so the panel renders immediately
-        // without a second LLM call.
-        regenCacheRef.current.set(`${traceId}::${panelId}`, template);
-      }
-      cv.upsertPanel({
-        id: panelId,
-        kind: 'agent',
-        instruction: prompt,
-        endpointName,
-        template,
-        requiresRegeneration,
-        label: prompt,
-      });
+      applyAgentTemplate(template, { panelId, instruction: prompt, endpointName });
       setInstruction('');
     } catch {
       // The failure is surfaced via `agentError` below; the panel is not added.
     }
   };
+
+  // MLflow Assistant authoring: opens the assistant primed with the A2UI
+  // authoring guide + experiment/trace context, and applies whatever spec it
+  // returns to the SAME single agent panel (frontend-capture).
+  const assistant = useCustomViewAssistantBridge({
+    data: agentData,
+    currentTemplate: findAgentPanel()?.template,
+    onSpec: (jsonText, assistantInstruction) => {
+      const existingAgent = findAgentPanel();
+      const panelId = existingAgent?.id ?? nextPanelId();
+      try {
+        const template = prepareTemplateFromJson(jsonText, panelId);
+        applyAgentTemplate(template, {
+          panelId,
+          instruction: assistantInstruction,
+          endpointName: selectedEndpoint || undefined,
+        });
+        return undefined;
+      } catch (error) {
+        return error instanceof Error ? error.message : 'Failed to apply the assistant view.';
+      }
+    },
+  });
 
   const panels = cv.definition.panels;
   // Agent Mode is a single surface: once an agent panel exists, prompts edit it.
@@ -465,19 +515,19 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     >
       <div css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm, flexShrink: 0 }}>
         <div css={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: theme.spacing.sm }}>
-          <SegmentedControlGroup
-            name="custom-view-mode"
-            componentId="shared.model-trace-explorer.custom-view.mode-toggle"
-            value={viewMode}
-            onChange={(event) => {
-              setViewMode(event.target.value);
-              resetAgent();
-            }}
-          >
-            <SegmentedControlButton value="predefined">Predefined Prompts</SegmentedControlButton>
-            <SegmentedControlButton value="agent">Agent Mode</SegmentedControlButton>
-          </SegmentedControlGroup>
+          <Typography.Title level={4} withoutMargins>
+            Agent Mode
+          </Typography.Title>
           <div css={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm }}>
+            {assistant.isAvailable && (
+              <Button
+                componentId="shared.model-trace-explorer.custom-view.assistant"
+                icon={<SparkleDoubleIcon />}
+                onClick={assistant.openAssistant}
+              >
+                {hasAgentPanel ? 'Edit with MLflow Assistant' : 'Build with MLflow Assistant'}
+              </Button>
+            )}
             {cv.canPersist && (
               <Button
                 componentId="shared.model-trace-explorer.custom-view.save"
@@ -504,89 +554,68 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
           </Typography.Text>
         )}
 
-        {viewMode === 'predefined' ? (
-          <div css={{ display: 'flex', alignItems: 'flex-end', gap: theme.spacing.sm }}>
-            <div css={{ width: 380 }}>
-              <SimpleSelect
-                componentId="shared.model-trace-explorer.custom-view.message-set-select"
-                id="model-trace-explorer-custom-view-message-set-select"
-                label="View"
-                value={selectedSetId}
-                onChange={(event) => setSelectedSetId(event.target.value)}
-              >
-                {MESSAGE_SETS.map((set) => (
-                  <SimpleSelectOption key={set.id} value={set.id}>
-                    {set.label}
-                  </SimpleSelectOption>
-                ))}
-              </SimpleSelect>
-            </div>
-            <Button
-              componentId="shared.model-trace-explorer.custom-view.add-block"
-              icon={<PlusIcon />}
-              onClick={handleAddBlock}
-            >
-              Add to dashboard
-            </Button>
-          </div>
-        ) : (
-          <div css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm }}>
-            {endpoints.length === 0 ? (
-              <Typography.Text color="secondary">
-                {endpointsLoading
-                  ? 'Loading AI gateway endpoints…'
-                  : 'No AI gateway endpoints are configured. Add one to use Agent Mode.'}
-              </Typography.Text>
-            ) : (
-              <>
-                <div css={{ display: 'flex', alignItems: 'flex-end', gap: theme.spacing.sm }}>
-                  <div css={{ width: 240 }}>
-                    <SimpleSelect
-                      componentId="shared.model-trace-explorer.custom-view.agent-endpoint-select"
-                      id="model-trace-explorer-custom-view-agent-endpoint-select"
-                      label="AI endpoint"
-                      value={selectedEndpoint}
-                      onChange={(event) => setSelectedEndpoint(event.target.value)}
-                    >
-                      {endpoints.map((endpoint) => (
-                        <SimpleSelectOption key={endpoint.name} value={endpoint.name}>
-                          {endpoint.name}
-                        </SimpleSelectOption>
-                      ))}
-                    </SimpleSelect>
-                  </div>
-                  <Button
-                    componentId="shared.model-trace-explorer.custom-view.agent-generate"
-                    icon={<PlusIcon />}
-                    loading={agentLoading}
-                    disabled={!selectedEndpoint || !instruction.trim() || agentLoading}
-                    onClick={handleGenerateAgentBlock}
-                  >
-                    {hasAgentPanel ? 'Update view' : 'Generate'}
-                  </Button>
-                </div>
-                <Input.TextArea
-                  componentId="shared.model-trace-explorer.custom-view.agent-instruction"
-                  placeholder={
-                    hasAgentPanel
-                      ? 'Refine the current view, e.g. “add a feedback button to each span” or “also show a tool latency table”.'
-                      : 'Describe the dashboard to generate, e.g. “Show a table of tool latencies and a timeline of all spans”.'
-                  }
-                  value={instruction}
-                  autoSize={{ minRows: 2, maxRows: 5 }}
-                  onKeyDown={(event) => event.stopPropagation()}
-                  onChange={(event) => setInstruction(event.target.value)}
-                  disabled={agentLoading}
-                />
-                {agentError && (
-                  <Typography.Text size="sm" css={{ color: theme.colors.textValidationDanger }}>
-                    {agentError.message}
-                  </Typography.Text>
-                )}
-              </>
-            )}
-          </div>
+        {assistant.applyError && (
+          <Typography.Text size="sm" css={{ color: theme.colors.textValidationDanger }}>
+            MLflow Assistant: {assistant.applyError}
+          </Typography.Text>
         )}
+
+        <div css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm }}>
+          {endpoints.length === 0 ? (
+            <Typography.Text color="secondary">
+              {endpointsLoading
+                ? 'Loading AI gateway endpoints…'
+                : 'No AI gateway endpoints are configured. Add one to use Agent Mode.'}
+            </Typography.Text>
+          ) : (
+            <>
+              <div css={{ display: 'flex', alignItems: 'flex-end', gap: theme.spacing.sm }}>
+                <div css={{ width: 240 }}>
+                  <SimpleSelect
+                    componentId="shared.model-trace-explorer.custom-view.agent-endpoint-select"
+                    id="model-trace-explorer-custom-view-agent-endpoint-select"
+                    label="AI endpoint"
+                    value={selectedEndpoint}
+                    onChange={(event) => setSelectedEndpoint(event.target.value)}
+                  >
+                    {endpoints.map((endpoint) => (
+                      <SimpleSelectOption key={endpoint.name} value={endpoint.name}>
+                        {endpoint.name}
+                      </SimpleSelectOption>
+                    ))}
+                  </SimpleSelect>
+                </div>
+                <Button
+                  componentId="shared.model-trace-explorer.custom-view.agent-generate"
+                  icon={<PlusIcon />}
+                  loading={agentLoading}
+                  disabled={!selectedEndpoint || !instruction.trim() || agentLoading}
+                  onClick={handleGenerateAgentBlock}
+                >
+                  {hasAgentPanel ? 'Update view' : 'Generate'}
+                </Button>
+              </div>
+              <Input.TextArea
+                componentId="shared.model-trace-explorer.custom-view.agent-instruction"
+                placeholder={
+                  hasAgentPanel
+                    ? 'Refine the current view, e.g. “add a feedback button to each span” or “also show a tool latency table”.'
+                    : 'Describe the dashboard to generate, e.g. “Show a table of tool latencies and a timeline of all spans”.'
+                }
+                value={instruction}
+                autoSize={{ minRows: 2, maxRows: 5 }}
+                onKeyDown={(event) => event.stopPropagation()}
+                onChange={(event) => setInstruction(event.target.value)}
+                disabled={agentLoading}
+              />
+              {agentError && (
+                <Typography.Text size="sm" css={{ color: theme.colors.textValidationDanger }}>
+                  {agentError.message}
+                </Typography.Text>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       <div
@@ -621,7 +650,7 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
               },
             }}
           >
-            <Empty description="Add a predefined view or generate one with Agent Mode. Saved views apply to every trace in this experiment." />
+            <Empty description="Generate a view with Agent Mode or MLflow Assistant. Saved views apply to every trace in this experiment." />
           </div>
         ) : (
           panels.map((panel) => {
