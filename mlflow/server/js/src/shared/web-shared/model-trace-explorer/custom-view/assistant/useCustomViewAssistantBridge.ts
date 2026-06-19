@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { A2uiMessage } from '@a2ui/web_core/v0_9';
 
-import { useAssistant, useRegisterAssistantContext } from '@mlflow/mlflow/src/assistant';
+import {
+  sendMessageStream,
+  useAssistant,
+  useAssistantPageContextActions,
+  useRegisterAssistantContext,
+} from '@mlflow/mlflow/src/assistant';
 
 import {
   type AgentTraceData,
@@ -11,7 +16,7 @@ import {
   CUSTOM_VIEW_SPEC_FENCE,
 } from '../agent/buildAgentPrompt';
 
-// Pulls the A2UI spec out of an assistant chat reply: the assistant is told (via
+// Pulls the A2UI spec out of an assistant reply: the assistant is told (via
 // context) to wrap the spec in a ```mlflow-custom-view fence so we never confuse
 // it with an unrelated ```json code block in a normal answer.
 const extractSpecFromMessage = (content: string): string | undefined => {
@@ -19,13 +24,31 @@ const extractSpecFromMessage = (content: string): string | undefined => {
   return fenced?.[1]?.trim() || undefined;
 };
 
+// A single in-flight headless (background) spec request: the spec JSON resolves
+// on completion, and `cancel` closes the underlying stream (used to abort stale
+// per-trace regenerations when the user cycles quickly).
+export type AssistantSpecRequest = {
+  specPromise: Promise<string>;
+  cancel: () => void;
+};
+
 export type CustomViewAssistantBridge = {
   // Whether MLflow Assistant is usable here (local server + completed setup).
   isAvailable: boolean;
   // True once the user has opened the assistant for authoring at least once.
   authoringEnabled: boolean;
-  // Open the assistant, enable authoring context, and prime the conversation.
-  openAssistant: () => void;
+  // Open the assistant for authoring. When `prompt` is given it is sent as the
+  // first message; otherwise the panel just opens for free-form editing.
+  openAssistant: (prompt?: string) => void;
+  // Fire a silent, headless authoring request (separate session, no chat UI) and
+  // resolve the extracted A2UI spec. Used for per-trace regeneration. The
+  // `referenceTemplate` (the stored design) is handed back to the assistant so it
+  // reproduces the SAME layout for the new trace's data.
+  requestSpec: (args: {
+    instruction: string;
+    data: AgentTraceData;
+    referenceTemplate?: A2uiMessage[];
+  }) => AssistantSpecRequest;
   // The latest error from applying an assistant-produced spec, if any.
   applyError?: string;
 };
@@ -34,9 +57,10 @@ export type CustomViewAssistantBridge = {
  * Bridges the custom view to MLflow Assistant (frontend-capture):
  * - registers the A2UI authoring guide + current template + trace snapshot as
  *   page context (so the assistant knows how to produce a view spec),
- * - opens the assistant panel on demand, and
+ * - opens the assistant panel on demand (optionally seeding the first message),
  * - watches the chat stream for a finalized reply containing the spec fence,
- *   handing the extracted JSON to `onSpec` (which validates + applies it).
+ *   handing the extracted JSON to `onSpec` (which validates + applies it), and
+ * - exposes `requestSpec` for silent, headless per-trace regeneration.
  *
  * `onSpec` is called with the extracted spec JSON and the user's triggering
  * request (used as the panel's instruction for per-trace regeneration). It
@@ -54,6 +78,7 @@ export const useCustomViewAssistantBridge = ({
 }): CustomViewAssistantBridge => {
   const assistant = useAssistant();
   const { isLocalServer, setupComplete, openPanel, sendMessage, messages } = assistant;
+  const { getContext, setContext } = useAssistantPageContextActions();
 
   const [authoringEnabled, setAuthoringEnabled] = useState(false);
   const [applyError, setApplyError] = useState<string | undefined>(undefined);
@@ -68,30 +93,137 @@ export const useCustomViewAssistantBridge = ({
 
   const isAvailable = isLocalServer && setupComplete;
 
-  // Register the authoring context only after the user opts in (avoids polluting
-  // unrelated assistant usage). The guide is static; the per-trace snapshot and
-  // current spec ride in their own fields.
-  const authoringContext = useMemo(() => {
-    if (!authoringEnabled) {
-      return undefined;
-    }
-    return {
+  // Builds the authoring context (static guide + per-trace snapshot + current
+  // spec). Shared by the declarative registration below and the synchronous
+  // registration in `openAssistant` so both stay in sync.
+  const buildAuthoringContext = useCallback(
+    () => ({
       guide: buildCustomViewAuthoringGuide(),
       currentTemplate: currentTemplate && currentTemplate.length > 0 ? JSON.stringify(currentTemplate) : null,
       traceSample: JSON.stringify(buildAgentDataSnapshot(data)),
-    };
-  }, [authoringEnabled, currentTemplate, data]);
+    }),
+    [currentTemplate, data],
+  );
+
+  // Register the authoring context only after the user opts in (avoids polluting
+  // unrelated assistant usage). The guide is static; the per-trace snapshot and
+  // current spec ride in their own fields.
+  const authoringContext = useMemo(
+    () => (authoringEnabled ? buildAuthoringContext() : undefined),
+    [authoringEnabled, buildAuthoringContext],
+  );
 
   useRegisterAssistantContext('customViewAuthoring', authoringContext);
 
-  const openAssistant = useCallback(() => {
-    setApplyError(undefined);
-    setAuthoringEnabled(true);
-    openPanel();
-    sendMessage(
-      "Help me build or update the custom trace view for this experiment. I'll describe the view I want next.",
-    );
-  }, [openPanel, sendMessage]);
+  const openAssistant = useCallback(
+    (prompt?: string) => {
+      setApplyError(undefined);
+      setAuthoringEnabled(true);
+      // Register the authoring context SYNCHRONOUSLY before sending: sendMessage
+      // reads the page context immediately (same tick), but the declarative
+      // useRegisterAssistantContext effect above would only run after the next
+      // render. Without this, the seeded first message goes out without the
+      // authoring guide and the assistant answers normally instead of emitting
+      // a custom-view spec.
+      setContext('customViewAuthoring', buildAuthoringContext());
+      openPanel();
+      if (prompt && prompt.trim()) {
+        sendMessage(prompt.trim());
+      }
+    },
+    [openPanel, sendMessage, setContext, buildAuthoringContext],
+  );
+
+  // Silent per-trace regeneration: drive the assistant backend directly (no chat
+  // UI, fresh session) so it never pollutes the user's visible conversation. The
+  // authoring guide + the CURRENT trace's snapshot ride in the request context.
+  // The `referenceTemplate` (the stored design) is passed as `currentTemplate` so
+  // the model reproduces the same layout — the guide instructs it to regenerate
+  // ALL data/span-ids from this trace's snapshot rather than reuse the
+  // reference's (which belong to a different trace).
+  const requestSpec = useCallback(
+    ({
+      instruction,
+      data: traceData,
+      referenceTemplate,
+    }: {
+      instruction: string;
+      data: AgentTraceData;
+      referenceTemplate?: A2uiMessage[];
+    }): AssistantSpecRequest => {
+      const pageContext = getContext();
+      const experimentId = typeof pageContext['experimentId'] === 'string' ? pageContext['experimentId'] : undefined;
+      const context = {
+        ...pageContext,
+        customViewAuthoring: {
+          guide: buildCustomViewAuthoringGuide(),
+          currentTemplate:
+            referenceTemplate && referenceTemplate.length > 0 ? JSON.stringify(referenceTemplate) : null,
+          traceSample: JSON.stringify(buildAgentDataSnapshot(traceData)),
+        },
+      };
+
+      let settled = false;
+      let accumulated = '';
+      let eventSource: EventSource | null = null;
+      let cancelled = false;
+
+      const specPromise = new Promise<string>((resolve, reject) => {
+        sendMessageStream(
+          { message: instruction, experiment_id: experimentId, context },
+          {
+            onMessage: (text) => {
+              accumulated += text;
+            },
+            onError: (error) => {
+              if (!settled) {
+                settled = true;
+                reject(new Error(error));
+              }
+            },
+            onDone: () => {
+              if (settled) {
+                return;
+              }
+              settled = true;
+              const spec = extractSpecFromMessage(accumulated);
+              if (spec) {
+                resolve(spec);
+              } else {
+                reject(new Error('MLflow Assistant did not return a custom view spec for this trace.'));
+              }
+            },
+            onInterrupted: () => {
+              if (!settled) {
+                settled = true;
+                reject(new Error('The request was cancelled.'));
+              }
+            },
+          },
+        )
+          .then((result) => {
+            eventSource = result.eventSource;
+            if (cancelled) {
+              eventSource?.close();
+            }
+          })
+          .catch((error) => {
+            if (!settled) {
+              settled = true;
+              reject(error instanceof Error ? error : new Error('Failed to reach MLflow Assistant.'));
+            }
+          });
+      });
+
+      const cancel = () => {
+        cancelled = true;
+        eventSource?.close();
+      };
+
+      return { specPromise, cancel };
+    },
+    [getContext],
+  );
 
   // Watch the chat stream for a completed assistant reply carrying a spec.
   useEffect(() => {
@@ -119,5 +251,5 @@ export const useCustomViewAssistantBridge = ({
     }
   }, [authoringEnabled, messages]);
 
-  return { isAvailable, authoringEnabled, openAssistant, applyError };
+  return { isAvailable, authoringEnabled, openAssistant, requestSpec, applyError };
 };

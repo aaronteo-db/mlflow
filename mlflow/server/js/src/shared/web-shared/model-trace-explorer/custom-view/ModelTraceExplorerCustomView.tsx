@@ -3,15 +3,12 @@ import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import {
   Button,
   Empty,
+  GenericSkeleton,
   Input,
-  PlusIcon,
-  SimpleSelect,
-  SimpleSelectOption,
   SparkleDoubleIcon,
   Typography,
   useDesignSystemTheme,
 } from '@databricks/design-system';
-import { useEndpointsQuery } from '@mlflow/mlflow/src/gateway/hooks/useEndpointsQuery';
 import { Catalog, MessageProcessor, type A2uiClientAction, type A2uiMessage } from '@a2ui/web_core/v0_9';
 import { BASIC_FUNCTIONS } from '@a2ui/web_core/v0_9/basic_catalog';
 import { A2uiSurface, Column, Row, Text, type ReactComponentImplementation } from '@a2ui/react/v0_9';
@@ -22,22 +19,21 @@ import { isV3ModelTraceInfo } from '../ModelTraceExplorer.utils';
 import { useModelTraceExplorerViewState } from '../ModelTraceExplorerViewStateContext';
 import { getUser } from '../../global-settings/getUser';
 import { useCreateAssessment } from '../hooks/useCreateAssessment';
-import { AssessmentBoard } from './AssessmentBoard';
-import { AssessmentCard } from './AssessmentCard';
-import { Card } from './Card';
-import { DataTable } from './DataTable';
-import { DEFAULT_FEEDBACK_NAME, FEEDBACK_SUBMITTED, FeedbackButtons } from './FeedbackButtons';
-import { Icon } from './Icon';
-import { KeyValueViewer } from './KeyValueViewer';
-import { Markdown } from './Markdown';
-import { MediaRenderer } from './MediaRenderer';
-import { StatCard } from './StatCard';
-import { TimelineChart } from './TimelineChart';
+import { AssessmentBoard } from './catalog-primitives/AssessmentBoard';
+import { AssessmentCard } from './catalog-primitives/AssessmentCard';
+import { Card } from './catalog-primitives/Card';
+import { DataTable } from './catalog-primitives/DataTable';
+import { DEFAULT_FEEDBACK_NAME, FEEDBACK_SUBMITTED, FeedbackButtons } from './catalog-primitives/FeedbackButtons';
+import { Icon } from './catalog-primitives/Icon';
+import { KeyValueViewer } from './catalog-primitives/KeyValueViewer';
+import { Markdown } from './catalog-primitives/Markdown';
+import { MediaRenderer } from './catalog-primitives/MediaRenderer';
+import { StatCard } from './catalog-primitives/StatCard';
+import { TimelineChart } from './catalog-primitives/TimelineChart';
 import { type PanelItem } from './TreeSelectionContext';
-import { TreeNode } from './TreeNode';
-import { TREE_NODE_SELECTED, TreeView } from './TreeView';
+import { TreeNode } from './catalog-primitives/TreeNode';
+import { TREE_NODE_SELECTED, TreeView } from './catalog-primitives/TreeView';
 import type { AgentNode } from './agent/buildAgentPrompt';
-import { useAgentDashboard } from './agent/useAgentDashboard';
 import { validateAndPrepareMessages } from './agent/validateA2uiMessages';
 import { useCustomViewAssistantBridge } from './assistant/useCustomViewAssistantBridge';
 import {
@@ -52,10 +48,10 @@ import {
   getTimelineRowsFromNodes,
   getToolRowsFromNodeMap,
   getTreeNodesFromNodes,
+  stampTemplateOnSurface,
 } from './customViewBuilders';
 import { type CustomViewPanel, EMPTY_CUSTOM_VIEW_DEFINITION } from './customViewDefinition';
 import { useCustomViewDefinitionState, useOptionalCustomViewDefinition } from './CustomViewDefinitionContext';
-import { classifyPanelRequiresRegeneration, resolveTemplate } from './resolveTemplate';
 
 // Deterministic surface id per panel so React/A2UI reuse the same surface across
 // trace cycling (we rebuild the surface contents, not its identity).
@@ -68,6 +64,32 @@ const placeholderMessages = (surfaceId: string, text: string): A2uiMessage[] => 
   { version: 'v0.9', createSurface: { surfaceId, catalogId: CUSTOM_VIEW_CATALOG_ID, sendDataModel: true } },
   { version: 'v0.9', updateComponents: { surfaceId, components: [{ id: 'root', component: 'Text', text }] } },
 ];
+
+// Host-rendered loading state shown in a panel body while MLflow Assistant
+// regenerates the view for the active trace. The skeleton bars approximate a
+// generic dashboard layout so the panel doesn't collapse to a single line.
+const CustomViewGeneratingSkeleton = () => {
+  const { theme } = useDesignSystemTheme();
+  return (
+    <div
+      role="status"
+      aria-label="Generating this view for the current trace"
+      css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.md }}
+    >
+      <Typography.Text color="secondary">Generating this view for the current trace…</Typography.Text>
+      <div css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm }}>
+        <GenericSkeleton style={{ height: 24, width: '40%' }} />
+        <GenericSkeleton style={{ height: 72 }} />
+        <GenericSkeleton style={{ height: 72 }} />
+        <div css={{ display: 'flex', gap: theme.spacing.sm }}>
+          <GenericSkeleton style={{ height: 56, flex: 1 }} />
+          <GenericSkeleton style={{ height: 56, flex: 1 }} />
+        </div>
+        <GenericSkeleton style={{ height: 96 }} />
+      </div>
+    </div>
+  );
+};
 
 export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInfo: ModelTrace['info'] }) => {
   const { theme } = useDesignSystemTheme();
@@ -245,23 +267,18 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     [viewData, agentNodeMap, agentAssessments],
   );
 
-  const { data: endpoints, isLoading: endpointsLoading } = useEndpointsQuery();
-  const [selectedEndpoint, setSelectedEndpoint] = useState('');
+  // The prompt typed in the empty-state box before any view exists.
   const [instruction, setInstruction] = useState('');
-  const { generate, isLoading: agentLoading, error: agentError } = useAgentDashboard();
 
-  useEffect(() => {
-    if (!selectedEndpoint && endpoints.length > 0) {
-      setSelectedEndpoint(endpoints[0].name);
-    }
-  }, [endpoints, selectedEndpoint]);
-
-  // Per-(trace, panel) cache of LLM-generated templates for panels that must be
-  // regenerated per trace (trace-specific narrative the host can't re-bind). The
-  // template is still bound through resolveTemplate so its `$source` parts pick
-  // up the active trace's data.
+  // Per-(trace, panel) cache of Assistant-generated templates. Every panel is
+  // regenerated per trace, so this caches each trace's generated spec (keyed by
+  // `${traceId}::${panelId}`) — revisiting a trace renders instantly with no
+  // further LLM call (until the user edits the view).
   const regenCacheRef = useRef<Map<string, A2uiMessage[]>>(new Map());
   const regenInFlightRef = useRef<Set<string>>(new Set());
+  // Cancel handles for in-flight headless regenerations, keyed by cacheKey, so we
+  // can abort stale requests when the user cycles to a different trace.
+  const regenCancelsRef = useRef<Map<string, () => void>>(new Map());
   const [regenErrors, setRegenErrors] = useState<Record<string, string>>({});
   // Bumped whenever a background regeneration resolves so the rebuild effect re-runs.
   const [regenVersion, setRegenVersion] = useState(0);
@@ -270,111 +287,19 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
   // were removed.
   const managedSurfacesRef = useRef<Set<string>>(new Set());
 
+  // The id of the single assistant-authored panel. Held in a ref so that several
+  // specs applied in the SAME tick (the bridge can apply more than one assistant
+  // reply synchronously, before React commits the first panel) all resolve to the
+  // same id instead of each minting a fresh one — which would create duplicate
+  // panels. Survives `cv.definition` not having updated yet.
+  const agentPanelIdRef = useRef<string | undefined>(undefined);
+
   // The rebuild effect mutates the processor model AFTER render (creating new
   // surface objects). `A2uiSurface` binds to a specific surface instance, so we
   // force one render afterwards to re-read the current surfaces. This tick is
   // intentionally NOT a rebuild-effect dependency, so it never re-runs the
   // rebuild (no loop).
   const [, refreshSurfaces] = useReducer((tick: number) => tick + 1, 0);
-
-  // Rebuild every panel's surface whenever the definition or the active trace
-  // changes: agent panels bind their template to the current trace
-  // (regenerating per trace only when required).
-  useEffect(() => {
-    if (!cv.isLoaded) {
-      return;
-    }
-
-    const desired = new Set(cv.definition.panels.map(surfaceIdForPanel));
-    for (const surfaceId of Array.from(managedSurfacesRef.current)) {
-      if (!desired.has(surfaceId)) {
-        processor.processMessages([{ version: 'v0.9', deleteSurface: { surfaceId } }]);
-        managedSurfacesRef.current.delete(surfaceId);
-      }
-    }
-
-    const triggerRegen = (panel: Extract<CustomViewPanel, { kind: 'agent' }>, cacheKey: string) => {
-      if (regenInFlightRef.current.has(cacheKey) || regenErrors[cacheKey]) {
-        return;
-      }
-      regenInFlightRef.current.add(cacheKey);
-      generate({
-        instruction: panel.instruction,
-        endpointName: panel.endpointName ?? selectedEndpoint,
-        surfaceId: `regen-${cacheKey}`,
-        catalogId: CUSTOM_VIEW_CATALOG_ID,
-        data: agentData,
-        // NB: do NOT pass `previousTemplate` here. Span ids are random per trace,
-        // and handing the model the previous trace's template makes it echo those
-        // stale span ids instead of binding to THIS trace's nodeMap (producing a
-        // view whose nodes reference spans that don't exist in the current trace).
-        // Per-trace regeneration must be grounded only in the current trace's data.
-      })
-        .then((messages) => {
-          regenCacheRef.current.set(cacheKey, messages);
-          setRegenVersion((version) => version + 1);
-        })
-        .catch((error) => {
-          setRegenErrors((prev) => ({
-            ...prev,
-            [cacheKey]: error instanceof Error ? error.message : 'Failed to generate view for this trace.',
-          }));
-          // Re-run the rebuild so the panel's placeholder shows the error.
-          setRegenVersion((version) => version + 1);
-        })
-        .finally(() => {
-          regenInFlightRef.current.delete(cacheKey);
-        });
-    };
-
-    for (const panel of cv.definition.panels) {
-      const surfaceId = surfaceIdForPanel(panel);
-      // Delete any prior contents so the surface rebinds cleanly to this trace.
-      if (managedSurfacesRef.current.has(surfaceId)) {
-        processor.processMessages([{ version: 'v0.9', deleteSurface: { surfaceId } }]);
-      }
-
-      let messages: A2uiMessage[];
-      if (!panel.requiresRegeneration) {
-        messages = resolveTemplate(panel.template, surfaceId, viewData);
-      } else {
-        const cacheKey = `${traceId}::${panel.id}`;
-        const cached = regenCacheRef.current.get(cacheKey);
-        if (cached) {
-          messages = resolveTemplate(cached, surfaceId, viewData);
-        } else if (regenErrors[cacheKey]) {
-          messages = placeholderMessages(surfaceId, `Could not generate this view: ${regenErrors[cacheKey]}`);
-        } else {
-          messages = placeholderMessages(surfaceId, 'Generating this view for the current trace…');
-          triggerRegen(panel, cacheKey);
-        }
-      }
-
-      processor.processMessages(messages);
-      managedSurfacesRef.current.add(surfaceId);
-
-      // Re-inject the selected node's side panel (lazily built on selection, so
-      // wiped by the rebuild above). Only when the selection belongs to the
-      // active trace; on a trace change the surface remounts and selection resets.
-      const selection = selectionBySurfaceRef.current.get(surfaceId);
-      if (selection && selection.traceId === traceId) {
-        const panelComponents = buildSpanPanelComponents(
-          selection.nodeId,
-          selection.spanId,
-          selection.panelItems,
-          nodeMap,
-        );
-        processor.processMessages([
-          { version: 'v0.9', updateComponents: { surfaceId, components: panelComponents } },
-        ]);
-      }
-    }
-
-    // Re-read the (possibly recreated) surface objects on the next render so each
-    // panel renders its latest content rather than a deleted/stale surface.
-    refreshSurfaces();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cv.definition, cv.isLoaded, viewData, traceId, regenVersion, processor]);
 
   // Drops all cached per-trace regenerations for a panel whose template changed,
   // so other traces re-generate against the new spec instead of showing stale UI.
@@ -401,34 +326,42 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       (entry): entry is Extract<CustomViewPanel, { kind: 'agent' }> => entry.kind === 'agent',
     );
 
+  // The canonical id for the single agent panel: prefer the one already in the
+  // definition, else the id we minted earlier this session (ref), else a fresh
+  // one. Caching in the ref keeps the id stable across synchronous applies even
+  // before `cv.definition` reflects the new panel.
+  const resolveAgentPanelId = (): string => {
+    const id = findAgentPanel()?.id ?? agentPanelIdRef.current ?? nextPanelId();
+    agentPanelIdRef.current = id;
+    return id;
+  };
+
   // Applies an already-generated, validated template to the SINGLE agent panel
-  // (creating it on first use, modifying it thereafter). Shared by Agent Mode
-  // and MLflow Assistant so both edit one shared view.
+  // (creating it on first use, modifying it thereafter). Shared by the empty-state
+  // prompt box and the "Edit with MLflow Assistant" flow so both edit one view.
   const applyAgentTemplate = (
     template: A2uiMessage[],
-    { panelId, instruction: panelInstruction, endpointName }: { panelId: string; instruction: string; endpointName?: string },
+    { panelId, instruction: panelInstruction, label }: { panelId: string; instruction: string; label: string },
   ) => {
-    const requiresRegeneration = classifyPanelRequiresRegeneration(template);
-    // The template changed, so any cached regenerations for it are stale.
+    // The design changed, so any cached per-trace regenerations are stale.
     purgeRegenForPanel(panelId);
-    if (requiresRegeneration) {
-      // Seed the cache for the current trace so the panel renders immediately
-      // without a second LLM call.
-      regenCacheRef.current.set(`${traceId}::${panelId}`, template);
-    }
-    cv.upsertPanel({
+    // Seed the cache for the current trace so it renders immediately without a
+    // second Assistant call (the spec we just captured is for THIS trace).
+    regenCacheRef.current.set(`${traceId}::${panelId}`, template);
+    // Collapse to exactly this one panel (the view is a single surface). Using a
+    // replace rather than an upsert also clears any duplicate panels a prior race
+    // may have produced.
+    cv.setSinglePanel({
       id: panelId,
       kind: 'agent',
       instruction: panelInstruction,
-      endpointName,
       template,
-      requiresRegeneration,
-      label: panelInstruction,
+      label,
     });
   };
 
-  // Parses + validates a raw JSON spec (e.g. captured from an MLflow Assistant
-  // reply) into a processor-ready template. Throws a descriptive Error on failure.
+  // Parses + validates a raw JSON spec (captured from an MLflow Assistant reply)
+  // into a processor-ready template. Throws a descriptive Error on failure.
   const prepareTemplateFromJson = (jsonText: string, panelId: string): A2uiMessage[] => {
     let parsed: unknown;
     try {
@@ -446,57 +379,177 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     return result.messages;
   };
 
-  // Agent Mode uses a SINGLE surface: the first prompt creates the agent panel,
-  // and every subsequent prompt MODIFIES that same panel (the model receives the
-  // current spec and returns the full edited spec). So we reuse the existing
-  // agent panel's id (hence its surface) instead of appending a new block.
-  const handleGenerateAgentBlock = async () => {
-    const endpointName = selectedEndpoint;
-    const prompt = instruction.trim();
-    if (!endpointName || !prompt) {
-      return;
-    }
-    const existingAgent = findAgentPanel();
-    const panelId = existingAgent?.id ?? nextPanelId();
+  // The assistant wraps its spec as { title, messages }. Pulls out the LLM-chosen
+  // title (used as the panel label); returns undefined for a bare array or a
+  // missing/empty title so the caller can fall back.
+  const extractTitleFromJson = (jsonText: string): string | undefined => {
     try {
-      const template = await generate({
-        instruction: prompt,
-        endpointName,
-        surfaceId: `cv-template-${panelId}`,
-        catalogId: CUSTOM_VIEW_CATALOG_ID,
-        data: agentData,
-        // Iterative edit: hand the model the current spec so it modifies it.
-        previousTemplate: existingAgent?.template,
-      });
-      applyAgentTemplate(template, { panelId, instruction: prompt, endpointName });
-      setInstruction('');
+      const parsed = JSON.parse(jsonText);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const title = (parsed as Record<string, unknown>)['title'];
+        if (typeof title === 'string' && title.trim()) {
+          return title.trim();
+        }
+      }
     } catch {
-      // The failure is surfaced via `agentError` below; the panel is not added.
+      // Fall through to undefined; prepareTemplateFromJson surfaces parse errors.
     }
+    return undefined;
   };
 
-  // MLflow Assistant authoring: opens the assistant primed with the A2UI
-  // authoring guide + experiment/trace context, and applies whatever spec it
-  // returns to the SAME single agent panel (frontend-capture).
+  // All custom-view authoring goes through MLflow Assistant: the empty-state box
+  // and the "Edit" button open the assistant chat (frontend-capture via onSpec),
+  // and `requestSpec` drives a silent headless call for per-trace regeneration.
+  // The view is a SINGLE agent panel: the first spec creates it, later specs edit
+  // it (same id / surface).
   const assistant = useCustomViewAssistantBridge({
     data: agentData,
     currentTemplate: findAgentPanel()?.template,
     onSpec: (jsonText, assistantInstruction) => {
       const existingAgent = findAgentPanel();
-      const panelId = existingAgent?.id ?? nextPanelId();
+      const panelId = resolveAgentPanelId();
       try {
         const template = prepareTemplateFromJson(jsonText, panelId);
-        applyAgentTemplate(template, {
-          panelId,
-          instruction: assistantInstruction,
-          endpointName: selectedEndpoint || undefined,
-        });
+        // Prefer the LLM-chosen title; keep the prior title on an edit that omits
+        // one; fall back to the raw request only for a brand-new untitled view.
+        const label = extractTitleFromJson(jsonText) ?? existingAgent?.label ?? assistantInstruction;
+        applyAgentTemplate(template, { panelId, instruction: assistantInstruction, label });
         return undefined;
       } catch (error) {
         return error instanceof Error ? error.message : 'Failed to apply the assistant view.';
       }
     },
   });
+
+  // When the user cycles to a different trace, abort any in-flight headless
+  // regeneration for the previous trace (its result is no longer relevant).
+  useEffect(() => {
+    const prefix = `${traceId}::`;
+    for (const [key, cancel] of Array.from(regenCancelsRef.current.entries())) {
+      if (!key.startsWith(prefix)) {
+        cancel();
+        regenCancelsRef.current.delete(key);
+        regenInFlightRef.current.delete(key);
+      }
+    }
+  }, [traceId]);
+
+  // Rebuild every panel's surface whenever the definition or the active trace
+  // changes: a bindable panel re-binds its template to the current trace; a
+  // regenerative panel uses its cached per-trace template, or asks MLflow
+  // Assistant to (re)generate it silently in the background.
+  useEffect(() => {
+    if (!cv.isLoaded) {
+      return;
+    }
+
+    const desired = new Set(cv.definition.panels.map(surfaceIdForPanel));
+    for (const surfaceId of Array.from(managedSurfacesRef.current)) {
+      if (!desired.has(surfaceId)) {
+        processor.processMessages([{ version: 'v0.9', deleteSurface: { surfaceId } }]);
+        managedSurfacesRef.current.delete(surfaceId);
+      }
+    }
+
+    const triggerRegen = (panel: Extract<CustomViewPanel, { kind: 'agent' }>, cacheKey: string) => {
+      if (regenInFlightRef.current.has(cacheKey) || regenErrors[cacheKey]) {
+        return;
+      }
+      regenInFlightRef.current.add(cacheKey);
+      // Hand the stored design back as a reference so the regenerated view keeps
+      // the same layout, but ground all data/span-ids in the CURRENT trace's
+      // snapshot (the guide tells the model not to reuse the reference's ids).
+      const { specPromise, cancel } = assistant.requestSpec({
+        instruction: panel.instruction,
+        data: agentData,
+        referenceTemplate: panel.template,
+      });
+      regenCancelsRef.current.set(cacheKey, cancel);
+      specPromise
+        .then((specJson) => {
+          const template = prepareTemplateFromJson(specJson, panel.id);
+          regenCacheRef.current.set(cacheKey, template);
+          setRegenVersion((version) => version + 1);
+        })
+        .catch((error) => {
+          setRegenErrors((prev) => ({
+            ...prev,
+            [cacheKey]: error instanceof Error ? error.message : 'Failed to generate view for this trace.',
+          }));
+          // Re-run the rebuild so the panel's placeholder shows the error.
+          setRegenVersion((version) => version + 1);
+        })
+        .finally(() => {
+          regenInFlightRef.current.delete(cacheKey);
+          regenCancelsRef.current.delete(cacheKey);
+        });
+    };
+
+    for (const panel of cv.definition.panels) {
+      const surfaceId = surfaceIdForPanel(panel);
+      // Delete any prior contents so the surface rebinds cleanly to this trace.
+      if (managedSurfacesRef.current.has(surfaceId)) {
+        processor.processMessages([{ version: 'v0.9', deleteSurface: { surfaceId } }]);
+      }
+
+      let messages: A2uiMessage[];
+      const cacheKey = `${traceId}::${panel.id}`;
+      const cached = regenCacheRef.current.get(cacheKey);
+      if (cached) {
+        messages = stampTemplateOnSurface(cached, surfaceId);
+      } else if (regenErrors[cacheKey]) {
+        messages = placeholderMessages(surfaceId, `Could not generate this view: ${regenErrors[cacheKey]}`);
+      } else if (!assistant.isAvailable) {
+        // The stored template carries the data of the trace it was authored on, so
+        // rendering it for a different trace would show mismatched values with no
+        // way to regenerate. Without the assistant we can't rebuild for THIS trace,
+        // so show an explicit unavailable state instead of misleading stale data.
+        messages = placeholderMessages(
+          surfaceId,
+          'MLflow Assistant is unavailable, so this view can’t be generated for the current trace. Reconnect MLflow Assistant to render it.',
+        );
+      } else {
+        messages = placeholderMessages(surfaceId, 'Generating this view for the current trace…');
+        triggerRegen(panel, cacheKey);
+      }
+
+      processor.processMessages(messages);
+      managedSurfacesRef.current.add(surfaceId);
+
+      // Re-inject the selected node's side panel (lazily built on selection, so
+      // wiped by the rebuild above). Only when the selection belongs to the
+      // active trace; on a trace change the surface remounts and selection resets.
+      const selection = selectionBySurfaceRef.current.get(surfaceId);
+      if (selection && selection.traceId === traceId) {
+        const panelComponents = buildSpanPanelComponents(
+          selection.nodeId,
+          selection.spanId,
+          selection.panelItems,
+          nodeMap,
+        );
+        processor.processMessages([
+          { version: 'v0.9', updateComponents: { surfaceId, components: panelComponents } },
+        ]);
+      }
+    }
+
+    // Re-read the (possibly recreated) surface objects on the next render so each
+    // panel renders its latest content rather than a deleted/stale surface.
+    refreshSurfaces();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cv.definition, cv.isLoaded, viewData, traceId, regenVersion, processor, assistant.isAvailable]);
+
+  // Opens MLflow Assistant with the typed prompt as its first message; the reply
+  // is captured by the bridge and applied via onSpec. Used only by the empty
+  // state (before any view exists).
+  const handleSubmitPrompt = () => {
+    const prompt = instruction.trim();
+    if (!prompt) {
+      return;
+    }
+    assistant.openAssistant(prompt);
+    setInstruction('');
+  };
 
   const panels = cv.definition.panels;
   // Agent Mode is a single surface: once an agent panel exists, prompts edit it.
@@ -514,18 +567,15 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       }}
     >
       <div css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm, flexShrink: 0 }}>
-        <div css={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: theme.spacing.sm }}>
-          <Typography.Title level={4} withoutMargins>
-            Agent Mode
-          </Typography.Title>
+        <div css={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', gap: theme.spacing.sm }}>
           <div css={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm }}>
-            {assistant.isAvailable && (
+            {assistant.isAvailable && hasAgentPanel && (
               <Button
                 componentId="shared.model-trace-explorer.custom-view.assistant"
                 icon={<SparkleDoubleIcon />}
-                onClick={assistant.openAssistant}
+                onClick={() => assistant.openAssistant()}
               >
-                {hasAgentPanel ? 'Edit with MLflow Assistant' : 'Build with MLflow Assistant'}
+                Edit with MLflow Assistant
               </Button>
             )}
             {cv.canPersist && (
@@ -539,11 +589,11 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
               </Button>
             )}
             <Button
-              componentId="shared.model-trace-explorer.custom-view.clear-all"
+              componentId="shared.model-trace-explorer.custom-view.reset"
               onClick={cv.clearPanels}
               disabled={panels.length === 0}
             >
-              Clear all
+              Reset
             </Button>
           </div>
         </div>
@@ -559,63 +609,6 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
             MLflow Assistant: {assistant.applyError}
           </Typography.Text>
         )}
-
-        <div css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm }}>
-          {endpoints.length === 0 ? (
-            <Typography.Text color="secondary">
-              {endpointsLoading
-                ? 'Loading AI gateway endpoints…'
-                : 'No AI gateway endpoints are configured. Add one to use Agent Mode.'}
-            </Typography.Text>
-          ) : (
-            <>
-              <div css={{ display: 'flex', alignItems: 'flex-end', gap: theme.spacing.sm }}>
-                <div css={{ width: 240 }}>
-                  <SimpleSelect
-                    componentId="shared.model-trace-explorer.custom-view.agent-endpoint-select"
-                    id="model-trace-explorer-custom-view-agent-endpoint-select"
-                    label="AI endpoint"
-                    value={selectedEndpoint}
-                    onChange={(event) => setSelectedEndpoint(event.target.value)}
-                  >
-                    {endpoints.map((endpoint) => (
-                      <SimpleSelectOption key={endpoint.name} value={endpoint.name}>
-                        {endpoint.name}
-                      </SimpleSelectOption>
-                    ))}
-                  </SimpleSelect>
-                </div>
-                <Button
-                  componentId="shared.model-trace-explorer.custom-view.agent-generate"
-                  icon={<PlusIcon />}
-                  loading={agentLoading}
-                  disabled={!selectedEndpoint || !instruction.trim() || agentLoading}
-                  onClick={handleGenerateAgentBlock}
-                >
-                  {hasAgentPanel ? 'Update view' : 'Generate'}
-                </Button>
-              </div>
-              <Input.TextArea
-                componentId="shared.model-trace-explorer.custom-view.agent-instruction"
-                placeholder={
-                  hasAgentPanel
-                    ? 'Refine the current view, e.g. “add a feedback button to each span” or “also show a tool latency table”.'
-                    : 'Describe the dashboard to generate, e.g. “Show a table of tool latencies and a timeline of all spans”.'
-                }
-                value={instruction}
-                autoSize={{ minRows: 2, maxRows: 5 }}
-                onKeyDown={(event) => event.stopPropagation()}
-                onChange={(event) => setInstruction(event.target.value)}
-                disabled={agentLoading}
-              />
-              {agentError && (
-                <Typography.Text size="sm" css={{ color: theme.colors.textValidationDanger }}>
-                  {agentError.message}
-                </Typography.Text>
-              )}
-            </>
-          )}
-        </div>
       </div>
 
       <div
@@ -641,21 +634,62 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
               height: '100%',
               minHeight: 240,
               width: '100%',
-              '& > div': {
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-                alignItems: 'center',
-              },
+              padding: theme.spacing.lg,
             }}
           >
-            <Empty description="Generate a view with Agent Mode or MLflow Assistant. Saved views apply to every trace in this experiment." />
+            {assistant.isAvailable ? (
+              <div
+                css={{
+                  width: '100%',
+                  maxWidth: 720,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: theme.spacing.md,
+                }}
+              >
+                <div css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.xs, textAlign: 'center' }}>
+                  <Typography.Title level={3} withoutMargins>
+                    Build a custom trace view
+                  </Typography.Title>
+                  <Typography.Text color="secondary">
+                    Describe how you want to view your trace data and MLflow Assistant will build it.
+                  </Typography.Text>
+                </div>
+                <div css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm }}>
+                  <Input.TextArea
+                    componentId="shared.model-trace-explorer.custom-view.prompt"
+                    placeholder="Example: Show me all the spans in this trace with their information"
+                    value={instruction}
+                    autoSize={{ minRows: 3, maxRows: 8 }}
+                    onKeyDown={(event) => event.stopPropagation()}
+                    onChange={(event) => setInstruction(event.target.value)}
+                  />
+                  <div css={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      componentId="shared.model-trace-explorer.custom-view.build"
+                      icon={<SparkleDoubleIcon />}
+                      disabled={!instruction.trim()}
+                      onClick={handleSubmitPrompt}
+                    >
+                      Build with MLflow Assistant
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <Empty description="Set up MLflow Assistant to build a custom view for this experiment." />
+            )}
           </div>
         ) : (
           panels.map((panel) => {
             const surfaceId = surfaceIdForPanel(panel);
             const surface = processor.model.getSurface(surfaceId);
+            // Mirrors the rebuild effect's placeholder branch: a panel is still
+            // generating when the assistant is available but we have neither a
+            // cached render nor an error for this trace yet.
+            const cacheKey = `${traceId}::${panel.id}`;
+            const isGenerating =
+              assistant.isAvailable && !regenCacheRef.current.get(cacheKey) && !regenErrors[cacheKey];
             return (
               <div
                 key={surfaceId}
@@ -674,10 +708,20 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
                     borderBottom: `1px solid ${theme.colors.border}`,
                   }}
                 >
-                  <Typography.Text bold>{panel.label}</Typography.Text>
+                  <Typography.Title
+                    level={2}
+                    withoutMargins
+                    css={{ fontSize: 22, lineHeight: '28px', fontWeight: 600 }}
+                  >
+                    {panel.label}
+                  </Typography.Title>
                 </div>
                 <div css={{ padding: theme.spacing.md }}>
-                  {surface && <A2uiSurface key={`${surfaceId}-${traceId}`} surface={surface} />}
+                  {isGenerating ? (
+                    <CustomViewGeneratingSkeleton />
+                  ) : (
+                    surface && <A2uiSurface key={`${surfaceId}-${traceId}`} surface={surface} />
+                  )}
                 </div>
               </div>
             );

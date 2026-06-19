@@ -5,9 +5,9 @@ import { createComponentImplementation } from '@a2ui/react/v0_9';
 import { type ComponentApi, ChildListSchema, DynamicStringSchema } from '@a2ui/web_core/v0_9';
 import { ChevronDownIcon, ChevronRightIcon, Tag, Typography, useDesignSystemTheme } from '@databricks/design-system';
 
-import { ModelIconType } from '../ModelTrace.types';
-import { ModelTraceExplorerIcon } from '../ModelTraceExplorerIcon';
-import { type PanelItem, TreeDepthContext, useTreeDepth, useTreeSelection } from './TreeSelectionContext';
+import { ModelIconType } from '../../ModelTrace.types';
+import { ModelTraceExplorerIcon } from '../../ModelTraceExplorerIcon';
+import { type PanelItem, TreeDepthContext, useTreeDepth, useTreeSelection } from '../TreeSelectionContext';
 
 const INDENT_PER_DEPTH = 20;
 const CHEVRON_SLOT = 20;

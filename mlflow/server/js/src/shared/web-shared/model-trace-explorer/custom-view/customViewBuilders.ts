@@ -326,6 +326,35 @@ export const createSurfaceMessage = (surfaceId: string): A2uiMessage => ({
   },
 });
 
+// Prepares a stored/generated A2UI template for rendering on a specific surface.
+// The template already carries concrete trace data (it is generated fresh per
+// trace), so there is no data binding to do — we just inject a fresh
+// `createSurface` and rewrite the `surfaceId` on every message, dropping any
+// surface lifecycle messages the model emitted (the host owns the surface).
+export const stampTemplateOnSurface = (template: A2uiMessage[], surfaceId: string): A2uiMessage[] => {
+  const messages: A2uiMessage[] = [createSurfaceMessage(surfaceId)];
+  for (const rawMessage of template) {
+    const message = rawMessage as unknown as Record<string, unknown>;
+    if ('createSurface' in message || 'deleteSurface' in message) {
+      continue;
+    }
+    if ('updateComponents' in message && message.updateComponents && typeof message.updateComponents === 'object') {
+      messages.push({
+        version: 'v0.9',
+        updateComponents: { ...(message.updateComponents as Record<string, unknown>), surfaceId },
+      } as A2uiMessage);
+      continue;
+    }
+    if ('updateDataModel' in message && message.updateDataModel && typeof message.updateDataModel === 'object') {
+      messages.push({
+        version: 'v0.9',
+        updateDataModel: { ...(message.updateDataModel as Record<string, unknown>), surfaceId },
+      } as A2uiMessage);
+    }
+  }
+  return messages;
+};
+
 // Returns the span's "real" (non-`mlflow.`-prefixed) attributes, mirroring the
 // Details & Timeline Attributes tab.
 export const getSpanAttributes = (span?: ModelTraceSpanNode): Record<string, unknown> => {

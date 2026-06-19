@@ -2,8 +2,8 @@ import { z } from 'zod';
 import { createComponentImplementation } from '@a2ui/react/v0_9';
 import { type ComponentApi, DynamicStringSchema } from '@a2ui/web_core/v0_9';
 
-import { CodeSnippetRenderMode } from '../ModelTrace.types';
-import { ModelTraceExplorerCodeSnippet } from '../ModelTraceExplorerCodeSnippet';
+import { CodeSnippetRenderMode } from '../../ModelTrace.types';
+import { ModelTraceExplorerCodeSnippet } from '../../ModelTraceExplorerCodeSnippet';
 
 const FORMATS = ['json', 'text', 'markdown'] as const;
 type Format = (typeof FORMATS)[number];

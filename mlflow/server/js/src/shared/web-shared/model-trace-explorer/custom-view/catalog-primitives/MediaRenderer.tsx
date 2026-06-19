@@ -3,8 +3,8 @@ import { createComponentImplementation } from '@a2ui/react/v0_9';
 import { type ComponentApi, DynamicStringSchema } from '@a2ui/web_core/v0_9';
 import { useDesignSystemTheme } from '@databricks/design-system';
 
-import { ModelTraceExplorerAttachmentRenderer } from '../field-renderers/ModelTraceExplorerAttachmentRenderer';
-import { parseAttachmentUri } from '../field-renderers/attachment-utils';
+import { ModelTraceExplorerAttachmentRenderer } from '../../field-renderers/ModelTraceExplorerAttachmentRenderer';
+import { parseAttachmentUri } from '../../field-renderers/attachment-utils';
 
 /**
  * Schema (API) for our custom MediaRenderer. It renders trace media from a

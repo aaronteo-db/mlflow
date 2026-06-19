@@ -6,9 +6,9 @@ import { createComponentImplementation } from '@a2ui/react/v0_9';
 import { type ComponentApi, DynamicStringSchema } from '@a2ui/web_core/v0_9';
 import { Typography, useDesignSystemTheme } from '@databricks/design-system';
 
-import { GenAIMarkdownRenderer } from '../../genai-markdown-renderer/GenAIMarkdownRenderer';
-import type { GenAIMarkdownRendererProps } from '../../genai-markdown-renderer/GenAIMarkdownRenderer';
-import { useTreeSelection } from './TreeSelectionContext';
+import { GenAIMarkdownRenderer } from '../../../genai-markdown-renderer/GenAIMarkdownRenderer';
+import type { GenAIMarkdownRendererProps } from '../../../genai-markdown-renderer/GenAIMarkdownRenderer';
+import { useTreeSelection } from '../TreeSelectionContext';
 
 // Markdown link scheme that selects the node representing a span instead of
 // navigating: `[label](#span:<spanId>)`. Only active when rendered inside a

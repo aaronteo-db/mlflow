@@ -19,6 +19,10 @@ export type CustomViewDefinitionContextValue = {
   // if no panel with that id exists. Used by Agent Mode to iteratively modify the
   // single agent panel instead of appending a new one each prompt.
   upsertPanel: (panel: CustomViewPanel) => void;
+  // Collapse the definition to EXACTLY this one panel. The custom view is a single
+  // assistant-authored surface, so applying a template replaces whatever is there
+  // (and atomically clears any duplicates a prior race may have left behind).
+  setSinglePanel: (panel: CustomViewPanel) => void;
   removePanel: (panelId: string) => void;
   movePanel: (panelId: string, direction: -1 | 1) => void;
   clearPanels: () => void;
@@ -72,6 +76,10 @@ export const useCustomViewDefinitionState = (
     });
   }, []);
 
+  const setSinglePanel = useCallback((panel: CustomViewPanel) => {
+    setDefinition((prev) => ({ ...prev, panels: [panel] }));
+  }, []);
+
   const removePanel = useCallback((panelId: string) => {
     setDefinition((prev) => ({ ...prev, panels: prev.panels.filter((panel) => panel.id !== panelId) }));
   }, []);
@@ -119,6 +127,7 @@ export const useCustomViewDefinitionState = (
     saveError,
     addPanel,
     upsertPanel,
+    setSinglePanel,
     removePanel,
     movePanel,
     clearPanels,

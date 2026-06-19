@@ -10,7 +10,7 @@ import {
   type TreeSelectionContextValue,
   TreeDepthContext,
   TreeSelectionProvider,
-} from './TreeSelectionContext';
+} from '../TreeSelectionContext';
 
 // A2UI client action fired when a node is selected. The host's action handler
 // matches on this name, builds the side-panel subtree from the node's

@@ -6,20 +6,19 @@ import {
   UpdateDataModelMessageSchema,
 } from '@a2ui/web_core/v0_9';
 
-import { AssessmentBoardApi } from '../AssessmentBoard';
-import { AssessmentCardApi } from '../AssessmentCard';
-import { CardApi } from '../Card';
-import { DataTableApi } from '../DataTable';
-import { FeedbackButtonsApi } from '../FeedbackButtons';
-import { IconApi } from '../Icon';
-import { KeyValueViewerApi } from '../KeyValueViewer';
-import { MarkdownApi } from '../Markdown';
-import { MediaRendererApi } from '../MediaRenderer';
-import { StatCardApi } from '../StatCard';
-import { TimelineChartApi } from '../TimelineChart';
-import { TreeNodeApi } from '../TreeNode';
-import { TreeViewApi } from '../TreeView';
-import { SOURCE_MARKER_KEY, isKnownSource, isSourceMarker } from '../resolveTemplate';
+import { AssessmentBoardApi } from '../catalog-primitives/AssessmentBoard';
+import { AssessmentCardApi } from '../catalog-primitives/AssessmentCard';
+import { CardApi } from '../catalog-primitives/Card';
+import { DataTableApi } from '../catalog-primitives/DataTable';
+import { FeedbackButtonsApi } from '../catalog-primitives/FeedbackButtons';
+import { IconApi } from '../catalog-primitives/Icon';
+import { KeyValueViewerApi } from '../catalog-primitives/KeyValueViewer';
+import { MarkdownApi } from '../catalog-primitives/Markdown';
+import { MediaRendererApi } from '../catalog-primitives/MediaRenderer';
+import { StatCardApi } from '../catalog-primitives/StatCard';
+import { TimelineChartApi } from '../catalog-primitives/TimelineChart';
+import { TreeNodeApi } from '../catalog-primitives/TreeNode';
+import { TreeViewApi } from '../catalog-primitives/TreeView';
 
 // Per-component prop schemas for the custom catalog components. The basic
 // catalog components (Text/Row/Column) are intentionally absent: they're
@@ -70,26 +69,11 @@ const toMessageArray = (raw: unknown): RawMessage[] | undefined => {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
-// Recursively collects every `$source` marker name found in a value, so a
-// template's data bindings can be validated without running the strict per-prop
-// schema (which expects concrete arrays/strings, not markers).
-const collectSourceNames = (value: unknown, out: string[]): void => {
-  if (isSourceMarker(value)) {
-    out.push(value[SOURCE_MARKER_KEY]);
-    return;
-  }
-  if (Array.isArray(value)) {
-    value.forEach((entry) => collectSourceNames(entry, out));
-    return;
-  }
-  if (isRecord(value)) {
-    Object.values(value).forEach((entry) => collectSourceNames(entry, out));
-  }
-};
-
 // Validates the props of a single component against the custom catalog schema.
 // `id` and `component` are stripped first since the per-component schemas (like
-// the renderer) only describe the component's own props.
+// the renderer) only describe the component's own props. Templates carry concrete
+// trace data (they are generated fresh per trace), so every prop is validated
+// strictly against its schema.
 const validateComponentProps = (component: Record<string, unknown>): string | undefined => {
   const componentName = component.component;
   if (typeof componentName !== 'string') {
@@ -99,20 +83,6 @@ const validateComponentProps = (component: Record<string, unknown>): string | un
     return `Component "${componentName}" is missing a non-empty "id".`;
   }
   const { id: _id, component: _component, ...props } = component;
-
-  // Templates bind data via `$source` markers instead of inlining it. When a
-  // component carries markers we validate the marker names (the host binds them
-  // per trace) and skip the strict prop schema, which would reject a marker
-  // where it expects a concrete array/string.
-  const sourceNames: string[] = [];
-  collectSourceNames(props, sourceNames);
-  if (sourceNames.length > 0) {
-    const unknown = sourceNames.find((name) => !isKnownSource(name));
-    if (unknown) {
-      return `Component "${String(component.id)}" (${componentName}) references an unknown data source "${unknown}".`;
-    }
-    return undefined;
-  }
 
   const schema = COMPONENT_SCHEMAS[componentName];
   if (!schema) {
