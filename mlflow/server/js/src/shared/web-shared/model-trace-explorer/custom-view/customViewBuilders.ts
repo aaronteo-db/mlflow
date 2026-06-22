@@ -389,6 +389,40 @@ export const buildSpanPanelComponents = (
         });
         break;
       }
+      case 'rating': {
+        childIds.push(itemId);
+        components.push({
+          id: itemId,
+          component: 'RadioGroup',
+          ...(item.label ? { label: item.label } : {}),
+          name: item.name || `Rating (${spanId ?? nodeId})`,
+          options: Array.isArray(item.options) ? item.options : [],
+          ...(spanId ? { spanId } : {}),
+        });
+        break;
+      }
+      case 'rationale': {
+        childIds.push(itemId);
+        components.push({
+          id: itemId,
+          component: 'FeedbackInputText',
+          ...(item.label ? { label: item.label } : {}),
+          name: item.name || `Rating (${spanId ?? nodeId})`,
+          field: 'rationale',
+          ...(item.placeholder ? { placeholder: item.placeholder } : {}),
+          ...(spanId ? { spanId } : {}),
+        });
+        break;
+      }
+      case 'submit': {
+        childIds.push(itemId);
+        components.push({
+          id: itemId,
+          component: 'FeedbackSubmit',
+          ...(item.label ? { label: item.label } : {}),
+        });
+        break;
+      }
       default:
         break;
     }

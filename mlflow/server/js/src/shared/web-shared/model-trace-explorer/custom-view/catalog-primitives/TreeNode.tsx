@@ -19,14 +19,24 @@ const ROW_HEIGHT = 28;
 const PanelItemSchema = z
   .object({
     type: z
-      .enum(['input', 'output', 'attributes', 'markdown', 'feedback'])
+      .enum(['input', 'output', 'attributes', 'markdown', 'feedback', 'rating', 'rationale', 'submit'])
       .describe(
-        'input/output/attributes -> host renders the span field as a KeyValueViewer; markdown -> a Markdown block; feedback -> FeedbackButtons scoped to this node\'s span.',
+        "input/output/attributes -> host renders the span field as a KeyValueViewer; markdown -> a Markdown block; feedback -> thumbs up/down FeedbackButtons scoped to this node's span (logs immediately); rating -> a RadioGroup of options; rationale -> a free-text box paired to a rating with the same name; submit -> a button that logs all staged rating/rationale on this view. Use rating(+rationale)+submit for multi-option ratings, feedback for a quick thumb.",
       ),
     text: z.string().describe('Markdown body (type: markdown).').optional(),
     title: z.string().describe('Section heading (markdown) or value label override.').optional(),
-    label: z.string().describe('Feedback prompt text (type: feedback).').optional(),
-    name: z.string().describe('Feedback assessment name (type: feedback).').optional(),
+    label: z.string().describe('Prompt text (feedback/rating/rationale) or button text (submit).').optional(),
+    name: z
+      .string()
+      .describe(
+        'Assessment + staging name (feedback/rating/rationale). A rating and its rationale MUST share the same name; make it UNIQUE per span (e.g. include the span name) so spans do not collide.',
+      )
+      .optional(),
+    options: z
+      .array(z.object({ label: z.string(), value: z.string() }))
+      .describe('Selectable options for a rating (type: rating), e.g. Complete / Mostly complete / Incomplete.')
+      .optional(),
+    placeholder: z.string().describe('Placeholder for a rationale text box (type: rationale).').optional(),
   })
   .strict();
 

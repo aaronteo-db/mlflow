@@ -17,11 +17,11 @@ import {
 } from '@databricks/design-system';
 import { Catalog, MessageProcessor, type A2uiClientAction, type A2uiMessage } from '@a2ui/web_core/v0_9';
 import { BASIC_FUNCTIONS } from '@a2ui/web_core/v0_9/basic_catalog';
-import { A2uiSurface, Column, Row, Text, type ReactComponentImplementation } from '@a2ui/react/v0_9';
+import { A2uiSurface, Column, Row, type ReactComponentImplementation } from '@a2ui/react/v0_9';
 
 import type { Feedback, ModelTrace } from '../ModelTrace.types';
 import { ModelSpanType } from '../ModelTrace.types';
-import { isV3ModelTraceInfo } from '../ModelTraceExplorer.utils';
+import { displaySuccessNotification, isV3ModelTraceInfo } from '../ModelTraceExplorer.utils';
 import { useModelTraceExplorerViewState } from '../ModelTraceExplorerViewStateContext';
 import { getUser } from '../../global-settings/getUser';
 import { useCreateAssessment } from '../hooks/useCreateAssessment';
@@ -30,6 +30,11 @@ import { AssessmentCard } from './catalog-primitives/AssessmentCard';
 import { Card } from './catalog-primitives/Card';
 import { DataTable } from './catalog-primitives/DataTable';
 import { DEFAULT_FEEDBACK_NAME, FEEDBACK_SUBMITTED, FeedbackButtons } from './catalog-primitives/FeedbackButtons';
+import { FEEDBACK_STAGED, FEEDBACK_SUBMIT_ALL, type StagedFeedbackContext } from './catalog-primitives/feedbackActions';
+import { FeedbackInputText } from './catalog-primitives/FeedbackInputText';
+import { FeedbackSubmit } from './catalog-primitives/FeedbackSubmit';
+import { RadioGroup } from './catalog-primitives/RadioGroup';
+import { Text } from './catalog-primitives/Text';
 import { Icon } from './catalog-primitives/Icon';
 import { KeyValueViewer } from './catalog-primitives/KeyValueViewer';
 import { Markdown } from './catalog-primitives/Markdown';
@@ -135,6 +140,9 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
           AssessmentCard,
           KeyValueViewer,
           FeedbackButtons,
+          RadioGroup,
+          FeedbackInputText,
+          FeedbackSubmit,
         ],
         BASIC_FUNCTIONS,
       ),
@@ -157,6 +165,13 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
   // selected node's panel — but only when it belongs to the active trace.
   const selectionBySurfaceRef = useRef<
     Map<string, { nodeId: string; spanId?: string; panelItems: PanelItem[]; traceId: string }>
+  >(new Map());
+
+  // Staged-but-unsubmitted feedback per surface, keyed by assessment name. The
+  // RadioGroup / FeedbackInputText primitives merge their value/rationale here
+  // (no POST); FeedbackSubmit flushes the surface's entries into assessments.
+  const pendingFeedbackRef = useRef<
+    Map<string, Map<string, { value?: string; rationale?: string; spanId?: string }>>
   >(new Map());
 
   const handleFeedbackAction = (action: A2uiClientAction) => {
@@ -195,9 +210,68 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     processor.processMessages([{ version: 'v0.9', updateComponents: { surfaceId: action.surfaceId, components } }]);
   };
 
+  // Merge a staged-feedback change into the surface's pending buffer (no POST).
+  const handleStageFeedback = (action: A2uiClientAction) => {
+    const context = (action.context ?? {}) as StagedFeedbackContext;
+    const name = typeof context.name === 'string' && context.name ? context.name : undefined;
+    if (!name) {
+      return;
+    }
+    let surfaceBuffer = pendingFeedbackRef.current.get(action.surfaceId);
+    if (!surfaceBuffer) {
+      surfaceBuffer = new Map();
+      pendingFeedbackRef.current.set(action.surfaceId, surfaceBuffer);
+    }
+    const previous = surfaceBuffer.get(name) ?? {};
+    surfaceBuffer.set(name, {
+      ...previous,
+      ...(typeof context.value === 'string' ? { value: context.value } : {}),
+      ...(typeof context.rationale === 'string' ? { rationale: context.rationale } : {}),
+      ...(typeof context.spanId === 'string' && context.spanId ? { spanId: context.spanId } : {}),
+    });
+  };
+
+  // Flush every staged dimension for the surface into MLflow assessments (one
+  // per name), then clear the buffer. Entries with neither a value nor a
+  // rationale are skipped.
+  const handleSubmitAllFeedback = (action: A2uiClientAction) => {
+    const surfaceBuffer = pendingFeedbackRef.current.get(action.surfaceId);
+    if (!surfaceBuffer || surfaceBuffer.size === 0) {
+      return;
+    }
+    let submitted = 0;
+    for (const [name, entry] of surfaceBuffer.entries()) {
+      const hasValue = typeof entry.value === 'string' && entry.value.length > 0;
+      const hasRationale = typeof entry.rationale === 'string' && entry.rationale.length > 0;
+      if (!hasValue && !hasRationale) {
+        continue;
+      }
+      const feedbackValue: { feedback: Feedback } = { feedback: { value: hasValue ? entry.value! : null } };
+      createAssessmentMutation({
+        assessment: {
+          assessment_name: name,
+          trace_id: traceId,
+          source: { source_type: 'HUMAN', source_id: getUser() ?? '' },
+          ...(entry.spanId ? { span_id: entry.spanId } : {}),
+          ...feedbackValue,
+          ...(hasRationale ? { rationale: entry.rationale } : {}),
+        },
+      });
+      submitted += 1;
+    }
+    pendingFeedbackRef.current.delete(action.surfaceId);
+    if (submitted > 0) {
+      displaySuccessNotification(`Submitted ${submitted} feedback ${submitted === 1 ? 'response' : 'responses'}.`);
+    }
+  };
+
   actionHandlerRef.current = (action: A2uiClientAction) => {
     if (action.name === FEEDBACK_SUBMITTED) {
       handleFeedbackAction(action);
+    } else if (action.name === FEEDBACK_STAGED) {
+      handleStageFeedback(action);
+    } else if (action.name === FEEDBACK_SUBMIT_ALL) {
+      handleSubmitAllFeedback(action);
     } else if (action.name === TREE_NODE_SELECTED) {
       handleTreeNodeSelected(action);
     }
@@ -261,6 +335,11 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
 
   // The prompt typed in the empty-state box before/while a view is being built.
   const [instruction, setInstruction] = useState('');
+
+  // True after the user submits the FIRST (chat-driven) build prompt and before
+  // a view exists, so the empty state can show a loading skeleton instead of the
+  // prompt box while MLflow Assistant streams its first reply.
+  const [isInitialBuilding, setIsInitialBuilding] = useState(false);
 
   // The naming modal collects the user-facing view name (distinct from the
   // LLM-generated panel label). Opened by "Create trace view" and by the first
@@ -471,6 +550,9 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
         regenInFlightRef.current.delete(key);
       }
     }
+    // Staged-but-unsubmitted feedback is scoped to the trace it was entered on;
+    // drop it when cycling so it never leaks onto a different trace's surface.
+    pendingFeedbackRef.current.clear();
   }, [traceId]);
 
   // Rebuild the active view's surface whenever the active view or the trace
@@ -598,7 +680,31 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     }
     assistant.openAssistant(prompt);
     setInstruction('');
+    setIsInitialBuilding(true);
   };
+
+  // Clear the initial-build skeleton once the build resolves: a view was created
+  // (success), the apply failed (error), or the assistant finished streaming
+  // without producing a spec. `isStreaming` flips true shortly after submit, so
+  // we only treat its falling edge as "done" once it has actually started.
+  const buildStreamStartedRef = useRef(false);
+  useEffect(() => {
+    if (!isInitialBuilding) {
+      buildStreamStartedRef.current = false;
+      return;
+    }
+    if (activeView || assistant.applyError) {
+      setIsInitialBuilding(false);
+      buildStreamStartedRef.current = false;
+      return;
+    }
+    if (assistant.isStreaming) {
+      buildStreamStartedRef.current = true;
+    } else if (buildStreamStartedRef.current) {
+      setIsInitialBuilding(false);
+      buildStreamStartedRef.current = false;
+    }
+  }, [isInitialBuilding, activeView, assistant.applyError, assistant.isStreaming]);
 
   const openCreateModal = () => {
     setNameModalMode('create');
@@ -791,6 +897,10 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
         {!cv.isLoaded ? (
           <div css={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 240 }}>
             <Typography.Text color="secondary">Loading saved custom views…</Typography.Text>
+          </div>
+        ) : !activeView && isInitialBuilding ? (
+          <div css={{ padding: theme.spacing.md }}>
+            <CustomViewGeneratingSkeleton />
           </div>
         ) : !activeView ? (
           <div

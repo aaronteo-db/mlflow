@@ -8,18 +8,24 @@ export const useTreeDepth = (): number => useContext(TreeDepthContext);
 
 // An author-supplied directive describing one entry in a node's side panel. The
 // host turns these into real components (KeyValueViewer / Markdown /
-// FeedbackButtons) on selection, pulling span data from its nodeMap — so the
-// author/LLM never has to emit the heavy span inputs/outputs themselves.
+// FeedbackButtons / RadioGroup / FeedbackInputText / FeedbackSubmit) on
+// selection, pulling span data from its nodeMap — so the author/LLM never has to
+// emit the heavy span inputs/outputs themselves.
 export type PanelItem = {
-  type: 'input' | 'output' | 'attributes' | 'markdown' | 'feedback';
+  type: 'input' | 'output' | 'attributes' | 'markdown' | 'feedback' | 'rating' | 'rationale' | 'submit';
   // markdown body (type === 'markdown').
   text?: string;
   // section heading (markdown) or KeyValueViewer label override.
   title?: string;
-  // feedback prompt text (type === 'feedback').
+  // prompt text for feedback / rating / rationale; button text for submit.
   label?: string;
-  // feedback assessment name (type === 'feedback').
+  // assessment + staging name (type === 'feedback' | 'rating' | 'rationale').
+  // A rating and its rationale must share the same name to pair up.
   name?: string;
+  // selectable options for a rating (type === 'rating').
+  options?: { label: string; value: string }[];
+  // placeholder for a rationale text box (type === 'rationale').
+  placeholder?: string;
 };
 
 /**

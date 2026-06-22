@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mlflow.org/model-trace-explorer/custom-view/catalog.json",
   "title": "MLflow Custom View Catalog",
-  "description": "Custom A2UI catalog for the model trace explorer custom view. Extends the basic catalog's Text, Row, and Column components with MLflow-specific MediaRenderer, Card, Icon, StatCard, DataTable, TimelineChart, TreeView, TreeNode, Markdown, AssessmentBoard, AssessmentCard, KeyValueViewer, and FeedbackButtons components.",
+  "description": "Custom A2UI catalog for the model trace explorer custom view. Extends the basic catalog's Text, Row, and Column components with MLflow-specific MediaRenderer, Card, Icon, StatCard, DataTable, TimelineChart, TreeView, TreeNode, Markdown, AssessmentBoard, AssessmentCard, KeyValueViewer, FeedbackButtons, RadioGroup, FeedbackInputText, and FeedbackSubmit components.",
   "catalogId": "https://mlflow.org/model-trace-explorer/custom-view/catalog.json",
   "components": {
     "allOf": [
@@ -300,8 +300,8 @@
                 "properties": {
                   "type": {
                     "type": "string",
-                    "description": "input/output/attributes -> the span field as a KeyValueViewer; markdown -> a Markdown block; feedback -> FeedbackButtons scoped to this node's span.",
-                    "enum": ["input", "output", "attributes", "markdown", "feedback"]
+                    "description": "input/output/attributes -> the span field as a KeyValueViewer; markdown -> a Markdown block; feedback -> thumbs up/down FeedbackButtons (immediate); rating -> a RadioGroup of options; rationale -> a free-text box paired to a rating with the same name; submit -> a button that logs all staged rating/rationale on this view.",
+                    "enum": ["input", "output", "attributes", "markdown", "feedback", "rating", "rationale", "submit"]
                   },
                   "text": {
                     "type": "string",
@@ -313,11 +313,27 @@
                   },
                   "label": {
                     "type": "string",
-                    "description": "Feedback prompt text (type: feedback)."
+                    "description": "Prompt text (feedback/rating/rationale) or button text (submit)."
                   },
                   "name": {
                     "type": "string",
-                    "description": "Feedback assessment name (type: feedback)."
+                    "description": "Assessment + staging name (feedback/rating/rationale). A rating and its rationale must share the same name; make it unique per span."
+                  },
+                  "options": {
+                    "type": "array",
+                    "description": "Selectable options for a rating (type: rating).",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "label": { "type": "string" },
+                        "value": { "type": "string" }
+                      },
+                      "required": ["label", "value"]
+                    }
+                  },
+                  "placeholder": {
+                    "type": "string",
+                    "description": "Placeholder for a rationale text box (type: rationale)."
                   }
                 },
                 "required": ["type"]
@@ -465,6 +481,111 @@
             "spanId": {
               "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
               "description": "Optional span id to scope the feedback to a specific span instead of the whole trace."
+            },
+            "weight": {
+              "type": "number",
+              "description": "Relative flex weight when placed directly inside a Row/Column."
+            }
+          },
+          "required": ["component"]
+        },
+        "RadioGroup": {
+          "type": "object",
+          "description": "An INTERACTIVE single-choice control for human feedback (e.g. comparing responses: \"Response A\" / \"Response B\" / \"Tie\"). Selecting an option stages the choice host-side under \"name\"; it is logged as an MLflow feedback assessment (string value) only when a FeedbackSubmit button is clicked. Emit one RadioGroup per feedback dimension, each with a unique \"name\".",
+          "properties": {
+            "component": {
+              "const": "RadioGroup"
+            },
+            "label": {
+              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "description": "Optional prompt shown above the options, e.g. \"Who did better on Accuracy?\"."
+            },
+            "name": {
+              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "description": "The assessment name this dimension logs (also the staging key). Required and unique per dimension; a FeedbackInputText sharing this name attaches as its rationale."
+            },
+            "options": {
+              "type": "array",
+              "description": "The selectable options, in display order.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "label": {
+                    "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+                    "description": "The option text shown to the user."
+                  },
+                  "value": {
+                    "type": "string",
+                    "description": "The feedback value logged when this option is selected."
+                  }
+                },
+                "required": ["label", "value"]
+              }
+            },
+            "value": {
+              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "description": "Selected option value. Bind to a /feedback/... data-model path to reflect and seed the choice."
+            },
+            "spanId": {
+              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "description": "Optional span id to scope the feedback to a specific span instead of the whole trace."
+            },
+            "weight": {
+              "type": "number",
+              "description": "Relative flex weight when placed directly inside a Row/Column."
+            }
+          },
+          "required": ["component", "name", "options"]
+        },
+        "FeedbackInputText": {
+          "type": "object",
+          "description": "A feedback-scoped free-text box (NOT a generic input). Its text is staged host-side under \"name\" and logged only on FeedbackSubmit. \"field\" controls what the text populates: \"rationale\" (default) attaches an optional why to a RadioGroup sharing the same \"name\"; \"value\" makes a standalone free-text feedback value (no radio needed). Never point a RadioGroup and a field:\"value\" FeedbackInputText at the same name.",
+          "properties": {
+            "component": {
+              "const": "FeedbackInputText"
+            },
+            "label": {
+              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "description": "Optional prompt shown above the box, e.g. \"Optional rationale (why?)\"."
+            },
+            "name": {
+              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "description": "The assessment name this text logs (also the staging key). Match a RadioGroup's name to attach as rationale, or use a unique name for a standalone free-text value."
+            },
+            "field": {
+              "type": "string",
+              "enum": ["value", "rationale"],
+              "description": "Whether the typed text becomes the assessment \"value\" or its \"rationale\". Defaults to \"rationale\"."
+            },
+            "placeholder": {
+              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "description": "Placeholder text shown when the box is empty."
+            },
+            "value": {
+              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "description": "Bind to a /feedback/... data-model path to reflect and seed the text."
+            },
+            "spanId": {
+              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "description": "Optional span id to scope the feedback to a specific span instead of the whole trace."
+            },
+            "weight": {
+              "type": "number",
+              "description": "Relative flex weight when placed directly inside a Row/Column."
+            }
+          },
+          "required": ["component", "name"]
+        },
+        "FeedbackSubmit": {
+          "type": "object",
+          "description": "A button that submits all staged feedback (from RadioGroup / FeedbackInputText) on the view. Clicking it logs one MLflow assessment per staged dimension and clears the staged values. Emit exactly one per view when collecting multi-dimension feedback.",
+          "properties": {
+            "component": {
+              "const": "FeedbackSubmit"
+            },
+            "label": {
+              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "description": "Button text. Defaults to \"Submit feedback\"."
             },
             "weight": {
               "type": "number",

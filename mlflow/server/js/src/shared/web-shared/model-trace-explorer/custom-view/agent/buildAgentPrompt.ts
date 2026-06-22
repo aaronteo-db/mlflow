@@ -58,7 +58,7 @@ export const CATALOG_REFERENCE = `Available components (use the "component" fiel
 
 - "Row": horizontal layout. props: { "children": [<child ids>], "align"?: "start"|"center"|"end"|"stretch" }
 - "Column": vertical layout. props: { "children": [<child ids>] }
-- "Text": plain text. props: { "text": <string> }
+- "Text": a single-line/short text label rendered as real typography (NOT Markdown — do not put #, *, or _ in "text"; use the "Markdown" component for bold/italic/lists/multi-line). props: { "text": <string>, "variant"?: "h1"|"h2"|"h3"|"h4"|"h5"|"caption"|"body", "weight"?: <number> }. Use "variant" to build hierarchy: a Card/section title should be an "h3" or "h4" heading (larger, bold); small secondary metadata (a span id, a timestamp, a duration) should be "caption" (small + muted), e.g. { "text": "span: 17a1d...", "variant": "caption" }. Omit "variant" (or use "body") for normal text.
 - "Card": a bordered container around a SINGLE child. props: { "child": <child id> }. To put multiple elements in a card, wrap them in a Row/Column and pass that container's id as the child.
 - "MediaRenderer": renders trace media (image, audio, or PDF). props: { "url": <string>, "alt"?: <alt text> }. "url" accepts a direct http(s):// URL, a data: URI, or an mlflow-attachment:// URI (the latter is fetched from the trace artifact store and rendered as a blob; image/audio/PDF are dispatched by content type). Audio and PDFs always arrive as mlflow-attachment:// URIs; only images can be a direct URL. Only use when the trace actually references a media URL or attachment.
 - "Icon": a single Databricks Design System icon. props: { "name": <string>, "size"?: <number> }. Use a camelCase name, e.g. "check", "close", "warning", "error", "info", "search", "download", "settings", "star", "person", "folder", "play", "pause" (DS-native aliases like "trash"/"gear"/"pencil"/"tag" also work). Unknown names render a neutral default. Use sparingly — most components (StatCard/DataTable/etc.) already carry their own icon prop.
@@ -66,12 +66,26 @@ export const CATALOG_REFERENCE = `Available components (use the "component" fiel
 - "DataTable": a column-aligned table. props: { "title"?: <string>, "icon"?: "list"|"wrench"|"clock"|"hash"|"checklist", "columns": [{ "label": <string>, "align"?: "left"|"center"|"right" }], "rows": [{ "color"?: <css color>, "cells": [<string>, ...] }], "emptyMessage"?: <string> }. Each row's "cells" are positional, aligned to "columns" by index.
 - "TimelineChart": a Gantt-style timeline. props: { "title"?: <string>, "icon"?: "list"|"wrench"|"clock"|"hash"|"checklist", "rows": [{ "label": <string>, "start": <number ms>, "end": <number ms>, "depth"?: <number>, "color"?: <css color> }], "emptyMessage"?: <string> }
 - "TreeView": a collapsible tree CONTAINER. props: { "title"?: <string>, "children": [<TreeNode ids>], "emptyMessage"?: <string> }. It lays out its TreeNode children on the left and, when a node with "panelItems" is selected, shows that node's side panel (built by the host from the span's data) on the right. Build the tree from "TreeNode" components referenced by id.
-- "TreeNode": one node in a TreeView. props: { "label"?: <string>, "title"?: <string heading; overrides label>, "icon"?: <span icon type, reuse the value from treeNodes>, "hasException"?: <bool>, "isRootSpan"?: <bool>, "badge"?: <string>, "spanId"?: <string span id>, "panelItems"?: [<side-panel directives>], "children"?: [<nested TreeNode ids>] }. "panelItems" declares WHAT the side panel shows when the node is selected; the host builds the actual components from the span's data, so you NEVER emit the span inputs/outputs yourself. Each item is one of: { "type": "input" } / { "type": "output" } / { "type": "attributes" } (the span field as a KeyValueViewer; optional "title" overrides the label), { "type": "markdown", "text": <markdown>, "title"?: <heading> } (a Markdown block; supports [text](#span:<spanId>) deeplinks), or { "type": "feedback", "label"?: <prompt>, "name"?: <assessment name> } (thumbs up/down scoped to this node's span). Give the node a "spanId" whenever you use input/output/attributes/feedback items so the host can find the span. Keep nodes MINIMAL by default (no "panelItems") unless the user asks to inspect spans, collect feedback, or summarize a trajectory.
+- "TreeNode": one node in a TreeView. props: { "label"?: <string>, "title"?: <string heading; overrides label>, "icon"?: <span icon type, reuse the value from treeNodes>, "hasException"?: <bool>, "isRootSpan"?: <bool>, "badge"?: <string>, "spanId"?: <string span id>, "panelItems"?: [<side-panel directives>], "children"?: [<nested TreeNode ids>] }. "panelItems" declares WHAT the side panel shows when the node is selected; the host builds the actual components from the span's data, so you NEVER emit the span inputs/outputs yourself. Each item is one of: { "type": "input" } / { "type": "output" } / { "type": "attributes" } (the span field as a KeyValueViewer; optional "title" overrides the label), { "type": "markdown", "text": <markdown>, "title"?: <heading> } (a Markdown block; supports [text](#span:<spanId>) deeplinks), { "type": "feedback", "label"?: <prompt>, "name"?: <assessment name> } (thumbs up/down scoped to this node's span, logged immediately), { "type": "rating", "label"?: <prompt>, "name": <assessment name>, "options": [{ "label": <string>, "value": <string> }] } (a RadioGroup of choices), { "type": "rationale", "label"?: <prompt>, "name": <SAME name as its rating>, "placeholder"?: <string> } (an optional free-text "why" paired to a rating), or { "type": "submit", "label"?: <button text> } (logs all staged rating/rationale on this view). For a per-span rating panel, give each span a rating (+ optional rationale) with a UNIQUE "name" that includes the span (so spans don't collide), plus exactly ONE submit per node panel. Give the node a "spanId" whenever you use input/output/attributes/feedback/rating/rationale items so the host can find the span. Keep nodes MINIMAL by default (no "panelItems") unless the user asks to inspect spans, collect feedback, or summarize a trajectory.
 - "Markdown": a markdown text block. props: { "text": <markdown string>, "title"?: <string heading> }. Links of the form [text](#span:<spanId>) select the TreeView node for that span instead of navigating. Usually you produce markdown via a TreeNode "panelItems" entry rather than a standalone component.
 - "KeyValueViewer": displays a SINGLE labeled value with a format toggle (text/json/markdown for strings; JSON tree for objects). props: { "label"?: <string>, "value": <JSON-encoded string>, "initialFormat"?: "json"|"text"|"markdown", "hideFormatToggle"?: <bool> }. Use this when the user asks to see ONE specific attribute/field of a span (e.g. a span's "model" input) OUTSIDE a tree. "value" is a scalar string, so you may inline it or bind it via updateDataModel + { "path": "/..." }; when the value is an object, JSON-stringify it first. (Inside a TreeView, prefer a TreeNode "panelItems" input/output/attributes directive instead — the host builds the KeyValueViewer for you.)
 - "AssessmentCard": a single colored box for one assessment/judge result. props: { "name": <string>, "value"?: <string>, "rationale"?: <string>, "source"?: <string>, "sentiment"?: "positive"|"negative"|"neutral"|"error" }. Set "name" to the assessment name, "value" to a SHORT verdict (e.g. "yes"/"no"/"Error" — never a long string), "rationale" to its rationale (put any long error message here, not in "value"), "source" to its source, and "sentiment" to "positive" for yes/true/pass values, "negative" for no/false/fail values, "error" if it has an error, else "neutral".
 - "AssessmentBoard": a wrapping container for AssessmentCards. props: { "title"?: <string>, "icon"?: "checklist"|"list"|"checkCircle", "children": [<AssessmentCard ids>], "emptyMessage"?: <string> }. For any request about judge results / evaluations / feedback, emit one AssessmentCard per entry in the "assessments" data and list their ids in this board's "children".
-- "FeedbackButtons": an INTERACTIVE thumbs up/down control that lets the user log feedback on the trace. props: { "label"?: <string prompt, e.g. "Was this helpful?">, "name"?: <assessment name, defaults to "User feedback">, "value"?: bind to a "/feedback/..." path via { "path": "/..." } to reflect the choice, "spanId"?: <string> }. Clicking a thumb logs an MLflow feedback assessment (thumbs up = true, thumbs down = false). Use this ONLY when the user explicitly asks to COLLECT/CAPTURE feedback or add a thumbs up/down control — never to display existing judge results (use AssessmentCard/AssessmentBoard for those).`;
+- "FeedbackButtons": an INTERACTIVE thumbs up/down control that lets the user log feedback on the trace. props: { "label"?: <string prompt, e.g. "Was this helpful?">, "name"?: <assessment name, defaults to "User feedback">, "value"?: bind to a "/feedback/..." path via { "path": "/..." } to reflect the choice, "spanId"?: <string> }. Clicking a thumb logs an MLflow feedback assessment (thumbs up = true, thumbs down = false) IMMEDIATELY. Use this ONLY when the user explicitly asks to COLLECT/CAPTURE feedback or add a thumbs up/down control — never to display existing judge results (use AssessmentCard/AssessmentBoard for those).
+- "RadioGroup": an INTERACTIVE single-choice feedback control (e.g. comparing responses: "Response A"/"Response B"/"Tie"). props: { "label"?: <string prompt, e.g. "Who did better on Accuracy?">, "name": <assessment name; REQUIRED and unique per dimension>, "options": [{ "label": <string>, "value": <string logged when selected> }], "value"?: bind to a "/feedback/..." path, "spanId"?: <string>, "weight"?: <number> }. Selecting an option STAGES the choice; it is logged only when a FeedbackSubmit is clicked. Emit one RadioGroup per feedback dimension.
+- "FeedbackInputText": a feedback-scoped free-text box (NOT a generic input). props: { "label"?: <string>, "name": <assessment name / staging key; REQUIRED>, "field"?: "value"|"rationale" (default "rationale"), "placeholder"?: <string>, "value"?: bind to "/feedback/...", "spanId"?: <string>, "weight"?: <number> }. With field "rationale", give it the SAME "name" as a RadioGroup to capture that dimension's optional "why"; with field "value", use it standalone as a free-text feedback value. Like RadioGroup, its text STAGES and is logged only on FeedbackSubmit.
+- "FeedbackSubmit": a button that submits ALL staged feedback (RadioGroup + FeedbackInputText) at once. props: { "label"?: <string, default "Submit feedback">, "weight"?: <number> }. Logs one assessment per staged dimension. Emit EXACTLY ONE when the view collects RadioGroup/FeedbackInputText feedback.
+
+Feedback authoring rules: RadioGroup/FeedbackInputText STAGE their values and require a single FeedbackSubmit to persist; FeedbackButtons logs immediately and needs no submit (do not mix the two styles in one form). To build a comparison/rating form, emit one RadioGroup per dimension (unique "name"), an optional FeedbackInputText with field "rationale" and the SAME "name" for each, and one FeedbackSubmit. NEVER point a RadioGroup and a field:"value" FeedbackInputText at the same "name" (they would both write the value). Only add feedback controls when the user explicitly asks to collect/capture feedback.`;
+
+export const LAYOUT_GUIDANCE = `Layout & visual polish (make views look designed, not flat):
+1. Give structure with Cards. Group each logical section (a span, a response, a feedback block) into its own "Card". A Card holds ONE child, so put a "Column" inside it.
+2. Title every Card. Make the FIRST child of a Card's Column a heading — a "Text" with "variant": "h3" or "h4" (or "h5" for sub-sections). Don't leave a bare body-text line acting as the title.
+3. Demote metadata to captions. Render span ids, durations, timestamps, and other secondary details as a "Text" with "variant": "caption" (small + muted), e.g. { "text": "span: <id>", "variant": "caption" } — not as plain body text.
+4. Use tiles for metrics. For single numbers/statuses (latency, tokens, status, counts) prefer "StatCard"s in a "Row" with "align": "stretch" rather than text lines.
+5. Lay out intentionally. Use a "Row" ("align": "stretch") for side-by-side cards and a "Column" for stacked sections; keep one logical thing per Card so widths stay even.
+6. Emphasize with Markdown. For bold/italic labels, lists, or multi-line prose use the "Markdown" component (the "Text" component is plain — never put # or ** inside its "text").
+7. Aim for a consistent rhythm: heading -> optional caption -> content -> any inputs, inside each Card.`;
 
 export const OUTPUT_RULES = `Output format rules (A2UI v0.9):
 1. Respond with ONLY a single JSON OBJECT wrapped in a \`\`\`json code fence: { "title": <string>, "messages": [ <message objects> ] }. "title" is a SHORT (2-5 word) human-readable name describing the view (e.g. "Trace Summary", "Span Cards", "Agent Key Actions") — NOT the user's raw prompt. "messages" is the A2UI message array described by all rules below. No prose inside the fence. (The examples below show only the "messages" array for brevity; you must still wrap them as { "title", "messages" }.)
@@ -183,6 +197,50 @@ export const MILESTONE_EXAMPLE = `Example — KEY ACTIONS / milestones that GROU
 \`\`\`
 Note: milestone nodes ("ms-*") have NO "spanId" and only a markdown summary; the real spans ("n-*") are nested as "children" and carry the "spanId" + input/output. A member span with its OWN sub-spans nests them the same way.`;
 
+export const FEEDBACK_EXAMPLE = `Example — a multi-dimension human-feedback form (only when the user asks to COLLECT feedback). One "RadioGroup" per dimension (unique "name"), an optional "FeedbackInputText" with field "rationale" sharing that "name", and exactly one "FeedbackSubmit" at the end. Values STAGE on change and are logged only when Submit is clicked:
+\`\`\`json
+[
+  {
+    "version": "v0.9",
+    "updateComponents": {
+      "surfaceId": "${PLACEHOLDER_SURFACE_ID}",
+      "components": [
+        { "id": "root", "component": "Column", "children": ["accuracy", "accuracy-why", "helpfulness", "submit"] },
+        { "id": "accuracy", "component": "RadioGroup", "label": "Who did better on Accuracy?", "name": "Accuracy", "options": [ { "label": "Response A", "value": "Response A" }, { "label": "Response B", "value": "Response B" }, { "label": "Tie / Neither", "value": "Tie" } ] },
+        { "id": "accuracy-why", "component": "FeedbackInputText", "label": "Optional rationale (why?)", "name": "Accuracy", "field": "rationale", "placeholder": "Briefly explain your choice (optional)" },
+        { "id": "helpfulness", "component": "RadioGroup", "label": "Who did better on Helpfulness?", "name": "Helpfulness", "options": [ { "label": "Response A", "value": "Response A" }, { "label": "Response B", "value": "Response B" }, { "label": "Tie / Neither", "value": "Tie" } ] },
+        { "id": "submit", "component": "FeedbackSubmit", "label": "Submit feedback" }
+      ]
+    }
+  }
+]
+\`\`\`
+For a single free-text feedback value instead of a rating, use a standalone "FeedbackInputText" with field "value" (its own unique "name") plus one "FeedbackSubmit".`;
+
+export const CARD_STYLE_EXAMPLE = `Example — a DECORATED card (apply this styling pattern to every card: titled heading, caption metadata, content, then inputs). Here one span Card is rated for completeness:
+\`\`\`json
+[
+  {
+    "version": "v0.9",
+    "updateComponents": {
+      "surfaceId": "${PLACEHOLDER_SURFACE_ID}",
+      "components": [
+        { "id": "root", "component": "Column", "children": ["span-card", "submit"] },
+        { "id": "span-card", "component": "Card", "child": "span-col" },
+        { "id": "span-col", "component": "Column", "children": ["span-title", "span-id", "span-output", "rating", "rating-why"] },
+        { "id": "span-title", "component": "Text", "text": "chat_agent", "variant": "h4" },
+        { "id": "span-id", "component": "Text", "text": "span: 17a1d77743cce439", "variant": "caption" },
+        { "id": "span-output", "component": "KeyValueViewer", "label": "Output", "value": "{...span output JSON...}", "initialFormat": "json" },
+        { "id": "rating", "component": "RadioGroup", "label": "How complete is this span?", "name": "Completeness — chat_agent", "spanId": "17a1d77743cce439", "options": [ { "label": "Complete", "value": "Complete" }, { "label": "Mostly complete", "value": "Mostly complete" }, { "label": "Partially complete", "value": "Partially complete" }, { "label": "Incomplete", "value": "Incomplete" }, { "label": "Not applicable", "value": "Not applicable" } ] },
+        { "id": "rating-why", "component": "FeedbackInputText", "label": "Optional rationale", "name": "Completeness — chat_agent", "field": "rationale", "placeholder": "Briefly explain (optional)" },
+        { "id": "submit", "component": "FeedbackSubmit", "label": "Submit feedback" }
+      ]
+    }
+  }
+]
+\`\`\`
+Note the heading ("variant":"h4") as the card title and the span id as a ("variant":"caption") line — repeat this pattern for each card, and give each span's RadioGroup a UNIQUE "name" (+ its "spanId") so per-span ratings don't collide.`;
+
 // Caps a potentially large array for the prompt, appending a note when trimmed
 // so the model knows more data exists than what it can inline.
 const cap = <T>(items: T[], max: number): { items: T[]; truncated: number } => {
@@ -259,5 +317,16 @@ export const buildCustomViewAuthoringGuide = (): string => {
 
   const fenceRule = `OUTPUT FENCE OVERRIDE: The rules above say to wrap the JSON in a \`json\` fence — for this custom-view surface, IGNORE that and wrap your final { "title", "messages" } object in a \`${CUSTOM_VIEW_SPEC_FENCE}\` fence instead. The example blocks below use a generic fence only for illustration of the JSON content; your actual reply MUST use the \`${CUSTOM_VIEW_SPEC_FENCE}\` fence.`;
 
-  return [intro, CATALOG_REFERENCE, OUTPUT_RULES, fenceRule, EXAMPLE, TREE_EXAMPLE, MILESTONE_EXAMPLE].join('\n\n');
+  return [
+    intro,
+    CATALOG_REFERENCE,
+    LAYOUT_GUIDANCE,
+    OUTPUT_RULES,
+    fenceRule,
+    EXAMPLE,
+    TREE_EXAMPLE,
+    MILESTONE_EXAMPLE,
+    CARD_STYLE_EXAMPLE,
+    FEEDBACK_EXAMPLE,
+  ].join('\n\n');
 };

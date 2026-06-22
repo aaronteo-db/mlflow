@@ -11,10 +11,13 @@ import { AssessmentCardApi } from '../catalog-primitives/AssessmentCard';
 import { CardApi } from '../catalog-primitives/Card';
 import { DataTableApi } from '../catalog-primitives/DataTable';
 import { FeedbackButtonsApi } from '../catalog-primitives/FeedbackButtons';
+import { FeedbackInputTextApi } from '../catalog-primitives/FeedbackInputText';
+import { FeedbackSubmitApi } from '../catalog-primitives/FeedbackSubmit';
 import { IconApi } from '../catalog-primitives/Icon';
 import { KeyValueViewerApi } from '../catalog-primitives/KeyValueViewer';
 import { MarkdownApi } from '../catalog-primitives/Markdown';
 import { MediaRendererApi } from '../catalog-primitives/MediaRenderer';
+import { RadioGroupApi } from '../catalog-primitives/RadioGroup';
 import { StatCardApi } from '../catalog-primitives/StatCard';
 import { TimelineChartApi } from '../catalog-primitives/TimelineChart';
 import { TreeNodeApi } from '../catalog-primitives/TreeNode';
@@ -38,6 +41,9 @@ const COMPONENT_SCHEMAS: Record<string, ZodTypeAny> = {
   [AssessmentCardApi.name]: AssessmentCardApi.schema,
   [KeyValueViewerApi.name]: KeyValueViewerApi.schema,
   [FeedbackButtonsApi.name]: FeedbackButtonsApi.schema,
+  [RadioGroupApi.name]: RadioGroupApi.schema,
+  [FeedbackInputTextApi.name]: FeedbackInputTextApi.schema,
+  [FeedbackSubmitApi.name]: FeedbackSubmitApi.schema,
 };
 
 export type ValidateResult =

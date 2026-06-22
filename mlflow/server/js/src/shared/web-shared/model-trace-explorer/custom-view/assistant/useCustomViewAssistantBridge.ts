@@ -19,9 +19,25 @@ import {
 // Pulls the A2UI spec out of an assistant reply: the assistant is told (via
 // context) to wrap the spec in a ```mlflow-custom-view fence so we never confuse
 // it with an unrelated ```json code block in a normal answer.
+//
+// The spec JSON can itself contain literal ``` sequences inside string values
+// (e.g. a Markdown/KeyValueViewer value with a fenced code block), so we must NOT
+// stop at the first ```. We slice from the opening fence to the LAST ``` in the
+// reply: the real closing fence is always the final triple-backtick (the guide
+// forbids content after the spec block), while the inner ``` sit inside JSON
+// strings earlier in the payload.
 const extractSpecFromMessage = (content: string): string | undefined => {
-  const fenced = content.match(new RegExp('```' + CUSTOM_VIEW_SPEC_FENCE + '\\s*([\\s\\S]*?)```', 'i'));
-  return fenced?.[1]?.trim() || undefined;
+  const open = content.match(new RegExp('```' + CUSTOM_VIEW_SPEC_FENCE + '[^\\n]*\\r?\\n', 'i'));
+  if (!open || open.index === undefined) {
+    return undefined;
+  }
+  const body = content.slice(open.index + open[0].length);
+  const close = body.lastIndexOf('```');
+  if (close === -1) {
+    // Closing fence not streamed yet (or omitted); nothing to apply.
+    return undefined;
+  }
+  return body.slice(0, close).trim() || undefined;
 };
 
 // A single in-flight headless (background) spec request: the spec JSON resolves
@@ -51,6 +67,11 @@ export type CustomViewAssistantBridge = {
   }) => AssistantSpecRequest;
   // The latest error from applying an assistant-produced spec, if any.
   applyError?: string;
+  // True while the assistant chat is actively streaming a reply. Used by the
+  // host to show a loading skeleton during the FIRST (chat-driven) build, when
+  // there is no active view yet (per-trace regeneration uses its own headless
+  // request and tracks loading separately).
+  isStreaming: boolean;
 };
 
 /**
@@ -77,7 +98,7 @@ export const useCustomViewAssistantBridge = ({
   onSpec: (jsonText: string, instruction: string) => string | undefined;
 }): CustomViewAssistantBridge => {
   const assistant = useAssistant();
-  const { isLocalServer, setupComplete, openPanel, sendMessage, messages } = assistant;
+  const { isLocalServer, setupComplete, openPanel, sendMessage, messages, isStreaming } = assistant;
   const { getContext, setContext } = useAssistantPageContextActions();
 
   const [authoringEnabled, setAuthoringEnabled] = useState(false);
@@ -251,5 +272,5 @@ export const useCustomViewAssistantBridge = ({
     }
   }, [authoringEnabled, messages]);
 
-  return { isAvailable, authoringEnabled, openAssistant, requestSpec, applyError };
+  return { isAvailable, authoringEnabled, openAssistant, requestSpec, applyError, isStreaming };
 };
