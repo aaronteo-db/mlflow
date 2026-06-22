@@ -1,155 +1,229 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { CustomViewDefinition, CustomViewPanel } from './customViewDefinition';
+import type { CustomView } from './customViewDefinition';
 
 export type CustomViewDefinitionContextValue = {
-  // The current (possibly edited) experiment-scoped definition.
-  definition: CustomViewDefinition;
-  // Whether the persisted definition has finished loading (false while the
-  // experiment tag is still being fetched).
+  // Every view available for this experiment (persisted views + in-memory
+  // edits + a freshly generated, not-yet-saved view).
+  views: CustomView[];
+  // The currently selected view id (undefined while a brand-new view is being
+  // drafted, or before anything is selected).
+  activeViewId?: string;
+  // The currently selected view, or undefined (empty-state / draft).
+  activeView?: CustomView;
+  // True while the user has started "Create trace view" but the assistant
+  // hasn't produced the first spec yet (the empty-state textbox is showing).
+  isDraft: boolean;
+  // The name chosen in the naming modal for the in-progress draft.
+  draftName: string;
+  // Whether the persisted views have finished loading.
   isLoaded: boolean;
   // Whether this value can persist to a backend (false for the session-local
   // fallback used outside the experiment provider).
   canPersist: boolean;
   isSaving: boolean;
+  // Whether the active view differs from its persisted counterpart (or has none).
   isDirty: boolean;
+  // Whether the active view has been persisted to the backend (false for a
+  // freshly built, never-saved view — for which Reset, not Delete, applies).
+  isActivePersisted: boolean;
   saveError?: string;
-  addPanel: (panel: CustomViewPanel) => void;
-  // Replace the panel with the same id in place (preserving order), or append it
-  // if no panel with that id exists. Used by Agent Mode to iteratively modify the
-  // single agent panel instead of appending a new one each prompt.
-  upsertPanel: (panel: CustomViewPanel) => void;
-  // Collapse the definition to EXACTLY this one panel. The custom view is a single
-  // assistant-authored surface, so applying a template replaces whatever is there
-  // (and atomically clears any duplicates a prior race may have left behind).
-  setSinglePanel: (panel: CustomViewPanel) => void;
-  removePanel: (panelId: string) => void;
-  movePanel: (panelId: string, direction: -1 | 1) => void;
-  clearPanels: () => void;
-  save: () => void;
+  selectView: (id: string) => void;
+  // Begin a brand-new view with the given user-provided name. Clears the active
+  // selection so the empty-state prompt box shows; the name rides along until
+  // the assistant materializes the view.
+  startNewView: (name: string) => void;
+  // Create or replace the active view's content (instruction / template / LLM
+  // label). Creates the view (and selects it) when it doesn't exist yet. The
+  // user-provided `name` is preserved, never overwritten by the assistant.
+  upsertViewContent: (view: CustomView) => void;
+  // Persist the active view, optionally renaming it first (the first-save flow
+  // passes the name collected from the modal).
+  saveActiveView: (nameOverride?: string) => void;
+  deleteView: (id: string) => void;
+  // Revert the active view's unsaved edits, or cancel an in-progress draft.
+  resetActiveView: () => void;
 };
 
 const CustomViewDefinitionContext = createContext<CustomViewDefinitionContextValue | undefined>(undefined);
 
+// Upsert a view by id into a list, preserving order (replace in place or append).
+const upsertById = (views: CustomView[], view: CustomView): CustomView[] => {
+  const index = views.findIndex((entry) => entry.id === view.id);
+  if (index < 0) {
+    return [...views, view];
+  }
+  const next = [...views];
+  next[index] = view;
+  return next;
+};
+
 // Core state hook shared by the persistent provider and the session-local
-// fallback. It manages the working definition, tracks dirtiness against the last
-// persisted snapshot, and (when given) delegates persistence to `onPersist`.
+// fallback. It manages the working view registry + active selection, tracks
+// per-view dirtiness against the last persisted snapshot, and (when given)
+// delegates persistence to `onPersistView` / `onDeleteView`.
 export const useCustomViewDefinitionState = (
-  initialDefinition: CustomViewDefinition,
+  initialViews: CustomView[],
   isLoaded: boolean,
-  onPersist?: (definition: CustomViewDefinition) => Promise<void>,
+  onPersistView?: (view: CustomView) => Promise<void>,
+  onDeleteView?: (id: string) => Promise<void>,
 ): CustomViewDefinitionContextValue => {
-  const [definition, setDefinition] = useState<CustomViewDefinition>(initialDefinition);
-  const [persistedDefinition, setPersistedDefinition] = useState<CustomViewDefinition>(initialDefinition);
+  const [views, setViews] = useState<CustomView[]>(initialViews);
+  const [persistedViews, setPersistedViews] = useState<CustomView[]>(initialViews);
+  const [activeViewId, setActiveViewId] = useState<string | undefined>(initialViews[0]?.id);
+  const [isDraft, setIsDraft] = useState(false);
+  const [draftName, setDraftName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | undefined>(undefined);
 
-  // Adopt the loaded definition exactly once, so a later refetch doesn't clobber
-  // unsaved local edits.
+  // Adopt the loaded views exactly once (defaulting the active view to the
+  // first), so a later refetch doesn't clobber unsaved local edits.
   const adoptedRef = useRef(false);
   useEffect(() => {
     if (isLoaded && !adoptedRef.current) {
       adoptedRef.current = true;
-      setDefinition(initialDefinition);
-      setPersistedDefinition(initialDefinition);
+      setViews(initialViews);
+      setPersistedViews(initialViews);
+      setActiveViewId((current) => current ?? initialViews[0]?.id);
     }
-  }, [isLoaded, initialDefinition]);
+  }, [isLoaded, initialViews]);
 
-  const isDirty = useMemo(
-    () => JSON.stringify(definition) !== JSON.stringify(persistedDefinition),
-    [definition, persistedDefinition],
+  const activeView = useMemo(() => views.find((view) => view.id === activeViewId), [views, activeViewId]);
+
+  const isDirty = useMemo(() => {
+    if (!activeView) {
+      return false;
+    }
+    const persisted = persistedViews.find((view) => view.id === activeView.id);
+    return JSON.stringify(activeView) !== JSON.stringify(persisted);
+  }, [activeView, persistedViews]);
+
+  const isActivePersisted = useMemo(
+    () => Boolean(activeViewId) && persistedViews.some((view) => view.id === activeViewId),
+    [activeViewId, persistedViews],
   );
 
-  const addPanel = useCallback((panel: CustomViewPanel) => {
-    setDefinition((prev) => ({ ...prev, panels: [...prev.panels, panel] }));
+  const selectView = useCallback((id: string) => {
+    setSaveError(undefined);
+    setIsDraft(false);
+    setDraftName('');
+    setActiveViewId(id);
   }, []);
 
-  const upsertPanel = useCallback((panel: CustomViewPanel) => {
-    setDefinition((prev) => {
-      const index = prev.panels.findIndex((entry) => entry.id === panel.id);
-      if (index < 0) {
-        return { ...prev, panels: [...prev.panels, panel] };
+  const startNewView = useCallback((name: string) => {
+    setSaveError(undefined);
+    setDraftName(name);
+    setIsDraft(true);
+    setActiveViewId(undefined);
+  }, []);
+
+  const upsertViewContent = useCallback((view: CustomView) => {
+    setViews((prev) => upsertById(prev, view));
+    setActiveViewId(view.id);
+    setIsDraft(false);
+    setDraftName('');
+  }, []);
+
+  const saveActiveView = useCallback(
+    async (nameOverride?: string) => {
+      if (!onPersistView || !activeView) {
+        return;
       }
-      const panels = [...prev.panels];
-      panels[index] = panel;
-      return { ...prev, panels };
-    });
-  }, []);
-
-  const setSinglePanel = useCallback((panel: CustomViewPanel) => {
-    setDefinition((prev) => ({ ...prev, panels: [panel] }));
-  }, []);
-
-  const removePanel = useCallback((panelId: string) => {
-    setDefinition((prev) => ({ ...prev, panels: prev.panels.filter((panel) => panel.id !== panelId) }));
-  }, []);
-
-  const movePanel = useCallback((panelId: string, direction: -1 | 1) => {
-    setDefinition((prev) => {
-      const index = prev.panels.findIndex((panel) => panel.id === panelId);
-      const target = index + direction;
-      if (index < 0 || target < 0 || target >= prev.panels.length) {
-        return prev;
+      const view =
+        nameOverride !== undefined && nameOverride.trim() ? { ...activeView, name: nameOverride.trim() } : activeView;
+      setIsSaving(true);
+      setSaveError(undefined);
+      try {
+        await onPersistView(view);
+        setViews((prev) => upsertById(prev, view));
+        setPersistedViews((prev) => upsertById(prev, view));
+      } catch (error) {
+        setSaveError(error instanceof Error ? error.message : 'Failed to save the custom view.');
+      } finally {
+        setIsSaving(false);
       }
-      const panels = [...prev.panels];
-      [panels[index], panels[target]] = [panels[target], panels[index]];
-      return { ...prev, panels };
-    });
-  }, []);
+    },
+    [onPersistView, activeView],
+  );
 
-  const clearPanels = useCallback(() => {
-    setDefinition((prev) => ({ ...prev, panels: [] }));
-  }, []);
+  const deleteView = useCallback(
+    async (id: string) => {
+      setSaveError(undefined);
+      if (onDeleteView && persistedViews.some((view) => view.id === id)) {
+        try {
+          await onDeleteView(id);
+        } catch (error) {
+          setSaveError(error instanceof Error ? error.message : 'Failed to delete the custom view.');
+          return;
+        }
+      }
+      const remaining = views.filter((view) => view.id !== id);
+      setPersistedViews((prev) => prev.filter((view) => view.id !== id));
+      setViews(remaining);
+      setActiveViewId((current) => (current === id ? remaining[0]?.id : current));
+    },
+    [onDeleteView, persistedViews, views],
+  );
 
-  const save = useCallback(async () => {
-    if (!onPersist) {
+  const resetActiveView = useCallback(() => {
+    setSaveError(undefined);
+    // Cancel an in-progress draft: drop back to the first persisted view.
+    if (isDraft || !activeViewId) {
+      setIsDraft(false);
+      setDraftName('');
+      setActiveViewId((current) => current ?? persistedViews[0]?.id);
       return;
     }
-    setIsSaving(true);
-    setSaveError(undefined);
-    const snapshot = definition;
-    try {
-      await onPersist(snapshot);
-      setPersistedDefinition(snapshot);
-    } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Failed to save the custom view.');
-    } finally {
-      setIsSaving(false);
+    const persisted = persistedViews.find((view) => view.id === activeViewId);
+    if (persisted) {
+      // Revert unsaved edits to the persisted snapshot.
+      setViews((prev) => upsertById(prev, persisted));
+    } else {
+      // Never saved: drop it and fall back to the first persisted view.
+      setViews((prev) => prev.filter((view) => view.id !== activeViewId));
+      setActiveViewId(persistedViews[0]?.id);
     }
-  }, [onPersist, definition]);
+  }, [isDraft, activeViewId, persistedViews]);
 
   return {
-    definition,
+    views,
+    activeViewId,
+    activeView,
+    isDraft,
+    draftName,
     isLoaded,
-    canPersist: Boolean(onPersist),
+    canPersist: Boolean(onPersistView),
     isSaving,
     isDirty,
+    isActivePersisted,
     saveError,
-    addPanel,
-    upsertPanel,
-    setSinglePanel,
-    removePanel,
-    movePanel,
-    clearPanels,
-    save,
+    selectView,
+    startNewView,
+    upsertViewContent,
+    saveActiveView,
+    deleteView,
+    resetActiveView,
   };
 };
 
-// Generic provider: experiment-tracking wires this up with a loaded definition +
-// an `onPersist` that writes the experiment tag. Mounted high enough (e.g. in the
-// traces table) that it survives drawer close / trace cycling.
+// Generic provider: experiment-tracking wires this up with the loaded views +
+// persist/delete callbacks that write per-view experiment tags. Mounted high
+// enough (e.g. in the traces table) that it survives drawer close / trace
+// cycling.
 export const CustomViewDefinitionProvider = ({
-  initialDefinition,
+  views,
   isLoaded,
-  onPersist,
+  onPersistView,
+  onDeleteView,
   children,
 }: {
-  initialDefinition: CustomViewDefinition;
+  views: CustomView[];
   isLoaded: boolean;
-  onPersist?: (definition: CustomViewDefinition) => Promise<void>;
+  onPersistView?: (view: CustomView) => Promise<void>;
+  onDeleteView?: (id: string) => Promise<void>;
   children: React.ReactNode;
 }) => {
-  const value = useCustomViewDefinitionState(initialDefinition, isLoaded, onPersist);
+  const value = useCustomViewDefinitionState(views, isLoaded, onPersistView, onDeleteView);
   return <CustomViewDefinitionContext.Provider value={value}>{children}</CustomViewDefinitionContext.Provider>;
 };
 
