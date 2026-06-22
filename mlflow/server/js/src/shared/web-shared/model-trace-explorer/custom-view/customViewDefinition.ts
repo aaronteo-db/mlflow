@@ -10,12 +10,17 @@ export const CUSTOM_VIEW_DEFINITION_VERSION = 1 as const;
 // The persisted recipe for one dashboard panel — the reusable "design" we store,
 // not bound trace data. A panel is regenerated per trace by MLflow Assistant:
 //
-//  - `template` is the most recent Assistant-generated A2UI spec. It serves three
+//  - `template` is the most recent Assistant-generated A2UI spec. It serves two
 //    roles: the design reference handed back to the Assistant when regenerating
-//    for another trace, the instant seed for the trace it was authored on, and a
-//    no-LLM fallback render when the Assistant is unavailable.
-//  - `instruction` is the latest natural-language request (the human intent +
-//    panel label) replayed alongside the reference template on regeneration.
+//    for another trace, and the instant cache seed for the trace it was authored
+//    on. It is NOT used as an offline render — when the Assistant is unavailable
+//    the host shows an explicit "view can't be generated" placeholder rather than
+//    this template, which holds the authoring trace's data and would mismatch the
+//    open trace.
+//  - `instruction` is the latest natural-language request (the human intent)
+//    replayed alongside the reference template on regeneration.
+//  - `label` is the short, LLM-chosen view title (e.g. "Trace Summary") shown as
+//    the panel header and persisted across traces.
 export type CustomViewPanel = {
   id: string;
   kind: 'agent';

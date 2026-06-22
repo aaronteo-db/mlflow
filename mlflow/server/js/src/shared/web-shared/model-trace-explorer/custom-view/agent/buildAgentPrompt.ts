@@ -194,7 +194,7 @@ const cap = <T>(items: T[], max: number): { items: T[]; truncated: number } => {
 
 // Keeps small inputs/outputs structured, but truncates large payloads to a
 // string so a single span can't blow up the prompt.
-const truncateValue = (value: unknown, max = 500): unknown => {
+const truncateValue = (value: unknown, max = 2000): unknown => {
   if (value === null || value === undefined) {
     return value;
   }
@@ -211,13 +211,13 @@ const truncateValue = (value: unknown, max = 500): unknown => {
 // bakes them into the generated view. Caps/truncation keep a large trace from
 // blowing up the prompt (very large values may be truncated in the rendered UI).
 export const buildAgentDataSnapshot = (data: AgentTraceData): Record<string, unknown> => {
-  const timeline = cap(data.timelineRows, 60);
-  const tree = cap(data.treeNodes, 40);
+  const timeline = cap(data.timelineRows, 300);
+  const tree = cap(data.treeNodes, 200);
 
   // Serialize the nodeMap for the prompt: cap the number of spans and truncate
   // each span's inputs/outputs so a large trace can't blow up the context.
   const nodeMapEntries = Object.entries(data.nodeMap ?? {});
-  const cappedEntries = nodeMapEntries.slice(0, 40);
+  const cappedEntries = nodeMapEntries.slice(0, 200);
   const nodeMapJson = Object.fromEntries(
     cappedEntries.map(([id, node]) => [
       id,
