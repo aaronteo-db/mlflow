@@ -39,11 +39,9 @@ import { useCustomViewAssistantBridge } from './assistant/useCustomViewAssistant
 import {
   CUSTOM_VIEW_CATALOG_ID,
   type CustomViewData,
-  type FirstToolIO,
   buildSpanPanelComponents,
   getAgentAssessments,
   getAssessmentBoardItems,
-  getContentFields,
   getMetricsFromTraceInfo,
   getTimelineRowsFromNodes,
   getToolRowsFromNodeMap,
@@ -216,24 +214,9 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
   const agentAssessments = useMemo(() => getAgentAssessments(modelTraceInfo, nodeMap), [modelTraceInfo, nodeMap]);
   const assessmentItems = useMemo(() => getAssessmentBoardItems(agentAssessments), [agentAssessments]);
 
-  const firstToolIO = useMemo<FirstToolIO | undefined>(() => {
-    const toolNodes = Object.values(nodeMap)
-      .filter((node) => node.type === ModelSpanType.TOOL)
-      .sort((a, b) => a.start - b.start);
-    if (toolNodes.length === 0) {
-      return undefined;
-    }
-    const tool = toolNodes[0];
-    return {
-      toolName: typeof tool.title === 'string' ? tool.title : String(tool.title ?? 'tool'),
-      input: getContentFields(tool.inputs)[0],
-      output: getContentFields(tool.outputs)[0],
-    };
-  }, [nodeMap]);
-
   const viewData = useMemo<CustomViewData>(
-    () => ({ metrics, toolRows, timelineRows, treeNodes, treeRoots, assessmentItems, firstToolIO }),
-    [metrics, toolRows, timelineRows, treeNodes, treeRoots, assessmentItems, firstToolIO],
+    () => ({ metrics, toolRows, timelineRows, treeNodes, assessmentItems }),
+    [metrics, toolRows, timelineRows, treeNodes, assessmentItems],
   );
 
   // The trace's nodeMap as plain JSON (keyed by span id) for Agent Mode.

@@ -69,10 +69,6 @@ export type TreeNodeData = {
   children: TreeNodeData[];
 };
 
-// A single key/value entry (e.g. for a KeyValueViewer). `value` is JSON-encoded
-// so the snippet renderer can show it as JSON (objects) or text/markdown (strings).
-export type ContentField = { label: string; value: string };
-
 export type AssessmentSentiment = 'positive' | 'negative' | 'neutral' | 'error';
 
 export type AssessmentBoardItem = {
@@ -83,43 +79,15 @@ export type AssessmentBoardItem = {
   sentiment: AssessmentSentiment;
 };
 
-// One attribute extracted from the first tool call: a key/value pair where
-// `value` is a JSON-encoded string (ready for KeyValueViewer).
-export type FirstToolIO = {
-  toolName: string;
-  input?: ContentField;
-  output?: ContentField;
-};
-
-// Everything a message set / template binding might need to render. Trace-level
-// metrics come from `modelTraceInfo`; per-tool rows, the timeline, and the tree
-// are derived from the parsed spans (nodeMap / topLevelNodes).
+// Everything the agent data snapshot needs to render. Trace-level metrics come
+// from `modelTraceInfo`; per-tool rows, the timeline, and the tree are derived
+// from the parsed spans (nodeMap / topLevelNodes).
 export type CustomViewData = {
   metrics: TraceMetrics;
   toolRows: TableRow[];
   timelineRows: TimelineRow[];
   treeNodes: TreeNodeData[];
-  // The span hierarchy (roots), used to materialize an agent template's span
-  // tree into TreeNode components with per-span side panels.
-  treeRoots: ModelTraceSpanNode[];
   assessmentItems: AssessmentBoardItem[];
-  firstToolIO?: FirstToolIO;
-};
-
-// Turns an arbitrary inputs/outputs payload into key/value fields. Objects
-// become one field per top-level key (mirroring the Details view's key/value
-// list); anything else becomes a single unlabeled field.
-export const getContentFields = (payload: unknown): ContentField[] => {
-  if (payload === null || payload === undefined) {
-    return [];
-  }
-  if (typeof payload === 'object' && !Array.isArray(payload)) {
-    return Object.entries(payload as Record<string, unknown>).map(([key, value]) => ({
-      label: key,
-      value: JSON.stringify(value, null, 2),
-    }));
-  }
-  return [{ label: '', value: JSON.stringify(payload, null, 2) }];
 };
 
 // Categorical palette for the per-tool indicator dots. Kept local so the shared
@@ -427,37 +395,4 @@ export const buildSpanPanelComponents = (
   });
 
   return [{ id: panelRootId, component: 'Column', children: childIds }, ...components];
-};
-
-export const spanName = (span: ModelTraceSpanNode): string =>
-  typeof span.title === 'string' ? span.title : String(span.title ?? 'span');
-
-// Recursively emits TreeNode components for a span AND its descendants into
-// `sink` (preserving the span hierarchy), attaching the given side-panel
-// `panelItems` to each node, and returns the span's node id. `state.counter`
-// keeps ids unique across the whole surface.
-export const buildSpanNodeComponents = (
-  span: ModelTraceSpanNode,
-  sink: Record<string, unknown>[],
-  options: { panelItems: PanelItem[]; idPrefix: string; state: { counter: number } },
-): string => {
-  options.state.counter += 1;
-  const nodeId = `${options.idPrefix}-${options.state.counter}-node`;
-  const childIds = (span.children ?? []).map((child) => buildSpanNodeComponents(child, sink, options));
-
-  const hasException = getSpanExceptionEvents(span).length > 0;
-  const assessmentCount = span.assessments?.length ?? 0;
-  sink.push({
-    id: nodeId,
-    component: 'TreeNode',
-    label: spanName(span),
-    icon: getIconTypeForSpan(span.type ?? ModelSpanType.UNKNOWN),
-    hasException,
-    isRootSpan: !span.parentId,
-    ...(assessmentCount > 0 ? { badge: String(assessmentCount) } : {}),
-    spanId: String(span.key),
-    ...(options.panelItems.length > 0 ? { panelItems: options.panelItems } : {}),
-    ...(childIds.length > 0 ? { children: childIds } : {}),
-  });
-  return nodeId;
 };
