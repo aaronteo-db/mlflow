@@ -10,9 +10,9 @@ import { AssessmentBoardApi } from '../catalog-primitives/AssessmentBoard';
 import { AssessmentCardApi } from '../catalog-primitives/AssessmentCard';
 import { CardApi } from '../catalog-primitives/Card';
 import { DataTableApi } from '../catalog-primitives/DataTable';
-import { FeedbackButtonsApi } from '../catalog-primitives/FeedbackButtons';
 import { FeedbackInputTextApi } from '../catalog-primitives/FeedbackInputText';
 import { FeedbackSubmitApi } from '../catalog-primitives/FeedbackSubmit';
+import { FeedbackThumbsUpDownButtonsApi } from '../catalog-primitives/FeedbackThumbsUpDownButtons';
 import { IconApi } from '../catalog-primitives/Icon';
 import { KeyValueViewerApi } from '../catalog-primitives/KeyValueViewer';
 import { MarkdownApi } from '../catalog-primitives/Markdown';
@@ -40,7 +40,7 @@ const COMPONENT_SCHEMAS: Record<string, ZodTypeAny> = {
   [AssessmentBoardApi.name]: AssessmentBoardApi.schema,
   [AssessmentCardApi.name]: AssessmentCardApi.schema,
   [KeyValueViewerApi.name]: KeyValueViewerApi.schema,
-  [FeedbackButtonsApi.name]: FeedbackButtonsApi.schema,
+  [FeedbackThumbsUpDownButtonsApi.name]: FeedbackThumbsUpDownButtonsApi.schema,
   [RadioGroupApi.name]: RadioGroupApi.schema,
   [FeedbackInputTextApi.name]: FeedbackInputTextApi.schema,
   [FeedbackSubmitApi.name]: FeedbackSubmitApi.schema,
@@ -74,6 +74,19 @@ const toMessageArray = (raw: unknown): RawMessage[] | undefined => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+
+// Models occasionally emit a component as `{ id, component, props: { ... } }`
+// (React-style) instead of our flat shape where every prop sits directly on the
+// object alongside `id`/`component`. Hoist a nested `props` object up so both the
+// strict per-component schema and the renderer (which consume the flat shape)
+// see the real props. Existing top-level keys win over the nested ones.
+const flattenComponentProps = (component: Record<string, unknown>): Record<string, unknown> => {
+  if (!isRecord(component.props)) {
+    return component;
+  }
+  const { props, ...rest } = component;
+  return { ...(props as Record<string, unknown>), ...rest };
+};
 
 // Validates the props of a single component against the custom catalog schema.
 // `id` and `component` are stripped first since the per-component schemas (like
@@ -146,7 +159,19 @@ export const validateAndPrepareMessages = (
     }
 
     if ('updateComponents' in message) {
-      const payload = isRecord(message.updateComponents) ? { ...message.updateComponents, surfaceId } : undefined;
+      let payload: Record<string, unknown> | undefined = isRecord(message.updateComponents)
+        ? { ...message.updateComponents, surfaceId }
+        : undefined;
+      // Flatten any nested `props` objects so validation and rendering both see
+      // the flat shape we expect.
+      if (payload && Array.isArray(payload.components)) {
+        payload = {
+          ...payload,
+          components: payload.components.map((component: unknown) =>
+            isRecord(component) ? flattenComponentProps(component) : component,
+          ),
+        };
+      }
       const normalized = { version: 'v0.9', updateComponents: payload };
       const parsed = UpdateComponentsMessageSchema.safeParse(normalized);
       if (!parsed.success) {

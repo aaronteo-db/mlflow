@@ -2,21 +2,25 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mlflow.org/model-trace-explorer/custom-view/catalog.json",
   "title": "MLflow Custom View Catalog",
-  "description": "Custom A2UI catalog for the model trace explorer custom view. Extends the basic catalog's Text, Row, and Column components with MLflow-specific MediaRenderer, Card, Icon, StatCard, DataTable, TimelineChart, TreeView, TreeNode, Markdown, AssessmentBoard, AssessmentCard, KeyValueViewer, FeedbackButtons, RadioGroup, FeedbackInputText, and FeedbackSubmit components.",
+  "description": "Custom A2UI catalog for the model trace explorer custom view.",
   "catalogId": "https://mlflow.org/model-trace-explorer/custom-view/catalog.json",
   "components": {
-    "allOf": [
-      {
-        "$ref": "https://a2ui.org/specification/v0_10/catalogs/basic/catalog.json#/components/Text"
-      },
-      {
-        "$ref": "https://a2ui.org/specification/v0_10/catalogs/basic/catalog.json#/components/Row"
-      },
-      {
-        "$ref": "https://a2ui.org/specification/v0_10/catalogs/basic/catalog.json#/components/Column"
-      },
-      {
-        "MediaRenderer": {
+    "Text": {
+      "$ref": "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json#/components/Text"
+    },
+    "Row": {
+      "$ref": "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json#/components/Row"
+    },
+    "Column": {
+      "$ref": "https://a2ui.org/specification/v0_9/catalogs/basic/catalog.json#/components/Column"
+    },
+    "MediaRenderer": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
           "description": "Renders trace media (image, audio, or PDF). Accepts a direct http(s):// URL, a data: URI, or an mlflow-attachment:// URI. For mlflow-attachment:// URIs the blob is fetched from the trace artifact store and rendered inline (image/audio/PDF are dispatched by content type, with a download fallback for large blobs and a click-to-expand preview for images). Audio and PDFs always arrive as mlflow-attachment:// URIs; only images can be a direct URL.",
           "properties": {
@@ -24,7 +28,7 @@
               "const": "MediaRenderer"
             },
             "url": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The media source: an http(s):// URL, a data: URI, or an mlflow-attachment:// URI."
             },
             "alt": {
@@ -38,17 +42,24 @@
           },
           "required": ["component", "url"]
         }
-      },
-      {
-        "Card": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "Card": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
-          "description": "A bordered container around a SINGLE child, themed with Databricks Design System tokens (a slightly-darker-than-white surface, border, and rounded corners) so it sits natively in the MLflow UI. To display multiple elements, wrap them in a Row/Column and pass that container's id as the child.",
+          "description": "A bordered container around a single child, themed with Databricks Design System tokens (a slightly-darker-than-white surface, border, and rounded corners) so it sits natively in the MLflow UI. To display multiple elements, wrap them in a Row/Column and pass that container's id as the child.",
           "properties": {
             "component": {
               "const": "Card"
             },
             "child": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/ComponentId",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentId",
               "description": "The id of the single child component to render inside the card."
             },
             "weight": {
@@ -58,17 +69,24 @@
           },
           "required": ["component", "child"]
         }
-      },
-      {
-        "Icon": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "Icon": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
-          "description": "A single Databricks Design System icon, referenced by name. Accepts the basic catalog's Material-style names (e.g. \"check\", \"close\", \"download\", \"search\", \"settings\", \"warning\", \"error\", \"info\", \"person\", \"folder\", \"star\") which are mapped to the closest DS icon, plus DS-native aliases (e.g. \"trash\", \"gear\", \"pencil\", \"tag\"). Unknown names degrade gracefully to a neutral default icon. Use sparingly: most components (StatCard/DataTable/etc.) already carry their own icon.",
+          "description": "A single Databricks Design System icon, referenced by name. Accepts the basic catalog's Material-style names (e.g. \"check\", \"close\", \"download\", \"search\", \"settings\", \"warning\", \"error\", \"info\", \"person\", \"folder\", \"star\") which are mapped to the closest DS icon, plus DS-native aliases (e.g. \"trash\", \"gear\", \"pencil\", \"tag\"). Unknown names degrade gracefully to a neutral default icon.",
           "properties": {
             "component": {
               "const": "Icon"
             },
             "name": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The icon to display, e.g. \"check\" or \"warning\"."
             },
             "size": {
@@ -78,9 +96,16 @@
           },
           "required": ["component", "name"]
         }
-      },
-      {
-        "StatCard": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "StatCard": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
           "description": "A metric card displaying a value, a caption, and a tinted icon. Matches the tool-call statistics cards on the experiment overview page.",
           "properties": {
@@ -88,11 +113,11 @@
               "const": "StatCard"
             },
             "value": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The metric value to display, e.g. \"14\" or \"275.71ms\"."
             },
             "label": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The caption describing the metric."
             },
             "icon": {
@@ -109,9 +134,16 @@
           },
           "required": ["component", "value", "label"]
         }
-      },
-      {
-        "DataTable": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "DataTable": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
           "description": "A generic, domain-agnostic table. Callers describe the columns and supply rows whose cells are positionally aligned to the columns. An optional per-row color renders a leading indicator dot in the first cell.",
           "properties": {
@@ -119,7 +151,7 @@
               "const": "DataTable"
             },
             "title": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional heading shown above the table."
             },
             "icon": {
@@ -134,7 +166,7 @@
                 "type": "object",
                 "properties": {
                   "label": {
-                    "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+                    "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
                     "description": "The column header text."
                   },
                   "align": {
@@ -161,7 +193,7 @@
                     "type": "array",
                     "description": "Cell values, positionally aligned to the columns.",
                     "items": {
-                      "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString"
+                      "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString"
                     }
                   }
                 },
@@ -169,23 +201,30 @@
               }
             },
             "emptyMessage": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Text shown when there are no rows."
             }
           },
           "required": ["component", "columns", "rows"]
         }
-      },
-      {
-        "TimelineChart": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "TimelineChart": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
-          "description": "A generic Gantt-style timeline. Each row is a horizontal bar positioned by its start/end offsets (in milliseconds, relative to a common origin). The component computes the axis, scaling, and duration labels, and works for any number of rows. Mirrors the Details & Timeline gantt view.",
+          "description": "A generic Gantt-style timeline. Each row is a horizontal bar positioned by its start/end offsets (in milliseconds, relative to a common origin). The component computes the axis, scaling, and duration labels, and works for any number of rows.",
           "properties": {
             "component": {
               "const": "TimelineChart"
             },
             "title": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional heading shown above the chart."
             },
             "icon": {
@@ -200,7 +239,7 @@
                 "type": "object",
                 "properties": {
                   "label": {
-                    "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+                    "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
                     "description": "The row label (e.g. the span name)."
                   },
                   "start": {
@@ -225,15 +264,22 @@
               }
             },
             "emptyMessage": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Text shown when there are no rows."
             }
           },
           "required": ["component", "rows"]
         }
-      },
-      {
-        "TreeView": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "TreeView": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
           "description": "A collapsible tree container. It lays out its TreeNode children (referenced by id) on the left and, when a node with panelItems is selected, shows that node's side panel (built by the host from the span's data) on the right. Selection is also driven by markdown #span:<id> deeplinks inside any markdown. Compose TreeNodes to map 1:1 to spans (with an input/output side panel) or to represent higher-level milestones whose markdown links to spans.",
           "properties": {
@@ -241,40 +287,47 @@
               "const": "TreeView"
             },
             "title": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional heading shown above the tree."
             },
             "children": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/ChildList",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ChildList",
               "description": "The root TreeNode component ids, in display order."
             },
             "emptyMessage": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Text shown when there are no nodes."
             }
           },
           "required": ["component", "children"]
         }
-      },
-      {
-        "TreeNode": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "TreeNode": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
-          "description": "A composable tree node. Renders a row (icon + label + optional badge) and an optional set of nested child TreeNodes. Attach panelItems directives describing what the host should build in the TreeView side panel when the node is selected (the span's input/output/attributes, a markdown summary, feedback buttons) — the host fills in the heavy span data, so the node stays tiny.",
+          "description": "A composable tree node. Renders a row (icon + label + optional badge) and an optional set of nested child TreeNodes. Attach panelItems directives describing what the host should build in the TreeView side panel when the node is selected (the span's input/output/attributes, a markdown summary, feedback buttons).",
           "properties": {
             "component": {
               "const": "TreeNode"
             },
             "label": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The node label (e.g. the span name). Used when title is absent."
             },
             "title": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Preferred node heading; falls back to label."
             },
             "icon": {
               "type": "string",
-              "description": "The span icon type (matches the Details & Timeline icons)."
+              "description": "The span icon type."
             },
             "hasException": {
               "type": "boolean",
@@ -285,22 +338,22 @@
               "description": "Renders the icon in the root/AI tone."
             },
             "badge": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional trailing tag text (e.g. an assessment count)."
             },
             "spanId": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional span id this node represents. Lets markdown #span:<id> deeplinks target this node and scopes the side panel + embedded feedback."
             },
             "panelItems": {
               "type": "array",
-              "description": "Directives for the side panel shown when this node is selected. The host builds the actual components (KeyValueViewer / Markdown / FeedbackButtons) from the span data — do NOT emit the span data yourself.",
+              "description": "Directives for the side panel shown when this node is selected. The host builds the actual components (KeyValueViewer / Markdown / FeedbackThumbsUpDownButtons) from the span data",
               "items": {
                 "type": "object",
                 "properties": {
                   "type": {
                     "type": "string",
-                    "description": "input/output/attributes -> the span field as a KeyValueViewer (the host also auto-renders any media attachments found in the field as players/thumbnails above the JSON); markdown -> a Markdown block; feedback -> thumbs up/down FeedbackButtons (immediate); rating -> a RadioGroup of options; rationale -> a free-text box paired to a rating with the same name; submit -> a button that logs all staged rating/rationale on this view.",
+                    "description": "input/output/attributes -> the span field as a KeyValueViewer (the host also auto-renders any media attachments found in the field as players/thumbnails above the JSON); markdown -> a Markdown block; feedback -> thumbs up/down FeedbackThumbsUpDownButtons; rating -> a RadioGroup of options; rationale -> a free-text box paired to a rating with the same name; submit -> a button that logs all staged rating/rationale on this view.",
                     "enum": ["input", "output", "attributes", "markdown", "feedback", "rating", "rationale", "submit"]
                   },
                   "text": {
@@ -340,47 +393,61 @@
               }
             },
             "children": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/ChildList",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ChildList",
               "description": "Nested TreeNode ids, rendered indented below this node."
             }
           },
           "required": ["component"]
         }
-      },
-      {
-        "Markdown": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "Markdown": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
-          "description": "Renders a markdown text block (optionally under a title). Links of the form [text](#span:<spanId>) select the TreeView node representing that span instead of navigating, so a span summary can deeplink into the spans it references. Typically built by the host inside a TreeNode side panel, but usable anywhere.",
+          "description": "Renders a markdown text block (optionally under a title). Links of the form [text](#span:<spanId>) are deeplinks: instead of navigating, they select that span's node in the TreeView. Typically built by the host inside a TreeNode side panel, but usable anywhere.",
           "properties": {
             "component": {
               "const": "Markdown"
             },
             "text": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The markdown body. Supports [text](#span:<spanId>) deeplinks when inside a TreeView."
             },
             "title": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional heading shown above the markdown."
             }
           },
           "required": ["component", "text"]
         }
-      },
-      {
-        "KeyValueViewer": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "KeyValueViewer": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
-          "description": "Displays a SINGLE labeled value using the Details & Timeline snippet renderer, with a format toggle (text/json/markdown for strings; an interactive JSON tree for objects/arrays). Use it to show one span attribute/input/output field directly.",
+          "description": "Displays a single labeled value, with a format toggle (text/json/markdown for strings; an interactive JSON tree for objects/arrays). Use it to show one span attribute/input/output field directly.",
           "properties": {
             "component": {
               "const": "KeyValueViewer"
             },
             "label": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The key/label shown above the value, e.g. the attribute name."
             },
             "value": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "JSON-encoded value to display (object/array -> JSON tree, string -> text/markdown/json)."
             },
             "initialFormat": {
@@ -395,9 +462,16 @@
           },
           "required": ["component", "value"]
         }
-      },
-      {
-        "AssessmentCard": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "AssessmentCard": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
           "description": "A single assessment box: the category is the header, the verdict is a colored badge, and the rationale fills the body. Sentiment drives the color (green positive, red negative/error). Reusable — append one per assessment into an AssessmentBoard (or any Row/Column).",
           "properties": {
@@ -405,19 +479,19 @@
               "const": "AssessmentCard"
             },
             "name": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The assessment category, shown as the box header."
             },
             "value": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The verdict/value, shown as a colored badge."
             },
             "rationale": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The explanation shown in the box body."
             },
             "source": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional source label, e.g. \"LLM_JUDGE\"."
             },
             "sentiment": {
@@ -428,9 +502,16 @@
           },
           "required": ["component", "name"]
         }
-      },
-      {
-        "AssessmentBoard": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "AssessmentBoard": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
           "description": "A wrapping container for assessment boxes. Renders an optional title followed by a wrapping row of child component ids (typically one AssessmentCard per assessment). Add more assessments by appending more AssessmentCard children.",
           "properties": {
@@ -438,7 +519,7 @@
               "const": "AssessmentBoard"
             },
             "title": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional heading shown above the boxes."
             },
             "icon": {
@@ -447,39 +528,46 @@
               "enum": ["checklist", "list", "checkCircle"]
             },
             "children": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/ChildList",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ChildList",
               "description": "The card component ids to lay out in a wrapping row."
             },
             "emptyMessage": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Text shown when there are no cards."
             }
           },
           "required": ["component", "children"]
         }
-      },
-      {
-        "FeedbackButtons": {
+      ],
+      "unevaluatedProperties": false
+    },
+    "FeedbackThumbsUpDownButtons": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        {
           "type": "object",
-          "description": "An interactive thumbs up / thumbs down control. Clicking a thumb logs an MLflow feedback assessment (boolean: thumbs up = true, thumbs down = false) for the current trace and reflects the choice via its bound value. A lightweight alternative to the full assessment input form.",
+          "description": "An interactive thumbs up / thumbs down control. Clicking a feedback button logs an MLflow feedback assessment (boolean: thumbs up = true, thumbs down = false) for the current trace and reflects the choice via its bound value. A lightweight alternative to the full assessment input form.",
           "properties": {
             "component": {
-              "const": "FeedbackButtons"
+              "const": "FeedbackThumbsUpDownButtons"
             },
             "label": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional prompt shown next to the thumbs, e.g. \"Was this helpful?\"."
             },
             "name": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The assessment name to log. Defaults to \"User feedback\"."
             },
             "value": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicBoolean",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicBoolean",
               "description": "Selected state: true = thumbs up, false = thumbs down. Bind to a /feedback/... data-model path to reflect and seed the choice."
             },
             "spanId": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional span id to scope the feedback to a specific span instead of the whole trace."
             },
             "weight": {
@@ -488,20 +576,29 @@
             }
           },
           "required": ["component"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "RadioGroup": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
         },
-        "RadioGroup": {
+        {
           "type": "object",
-          "description": "An INTERACTIVE single-choice control for human feedback (e.g. comparing responses: \"Response A\" / \"Response B\" / \"Tie\"). Selecting an option stages the choice host-side under \"name\"; it is logged as an MLflow feedback assessment (string value) only when a FeedbackSubmit button is clicked. Emit one RadioGroup per feedback dimension, each with a unique \"name\".",
+          "description": "An interactive single-choice control for human feedback. Selecting an option stages the choice host-side under \"name\"; it is logged as an MLflow feedback assessment (string value) only when a FeedbackSubmit button is clicked. Emit one RadioGroup per feedback dimension, each with a unique \"name\".",
           "properties": {
             "component": {
               "const": "RadioGroup"
             },
             "label": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional prompt shown above the options, e.g. \"Who did better on Accuracy?\"."
             },
             "name": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "The assessment name this dimension logs (also the staging key). Required and unique per dimension; a FeedbackInputText sharing this name attaches as its rationale."
             },
             "options": {
@@ -511,7 +608,7 @@
                 "type": "object",
                 "properties": {
                   "label": {
-                    "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+                    "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
                     "description": "The option text shown to the user."
                   },
                   "value": {
@@ -523,11 +620,11 @@
               }
             },
             "value": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Selected option value. Bind to a /feedback/... data-model path to reflect and seed the choice."
             },
             "spanId": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional span id to scope the feedback to a specific span instead of the whole trace."
             },
             "weight": {
@@ -536,21 +633,30 @@
             }
           },
           "required": ["component", "name", "options"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "FeedbackInputText": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
         },
-        "FeedbackInputText": {
+        {
           "type": "object",
-          "description": "A feedback-scoped free-text box (NOT a generic input). Its text is staged host-side under \"name\" and logged only on FeedbackSubmit. \"field\" controls what the text populates: \"rationale\" (default) attaches an optional why to a RadioGroup sharing the same \"name\"; \"value\" makes a standalone free-text feedback value (no radio needed). Never point a RadioGroup and a field:\"value\" FeedbackInputText at the same name.",
+          "description": "A feedback-scoped free-text box (not a generic input). Its text is staged host-side under \"name\" and logged only on FeedbackSubmit. \"field\" controls what the text populates: \"rationale\" (default) attaches an optional why to a RadioGroup sharing the same \"name\"; \"value\" makes a standalone free-text feedback value (no radio needed).",
           "properties": {
             "component": {
               "const": "FeedbackInputText"
             },
             "label": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional prompt shown above the box, e.g. \"Optional rationale (why?)\"."
             },
             "name": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
-              "description": "The assessment name this text logs (also the staging key). Match a RadioGroup's name to attach as rationale, or use a unique name for a standalone free-text value."
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
+              "description": "The assessment name this text logs. Match a RadioGroup's name to attach as rationale, or use a unique name for a standalone free-text value."
             },
             "field": {
               "type": "string",
@@ -558,15 +664,15 @@
               "description": "Whether the typed text becomes the assessment \"value\" or its \"rationale\". Defaults to \"rationale\"."
             },
             "placeholder": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Placeholder text shown when the box is empty."
             },
             "value": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Bind to a /feedback/... data-model path to reflect and seed the text."
             },
             "spanId": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Optional span id to scope the feedback to a specific span instead of the whole trace."
             },
             "weight": {
@@ -575,8 +681,17 @@
             }
           },
           "required": ["component", "name"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "FeedbackSubmit": {
+      "type": "object",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
         },
-        "FeedbackSubmit": {
+        {
           "type": "object",
           "description": "A button that submits all staged feedback (from RadioGroup / FeedbackInputText) on the view. Clicking it logs one MLflow assessment per staged dimension and clears the staged values. Emit exactly one per view when collecting multi-dimension feedback.",
           "properties": {
@@ -584,7 +699,7 @@
               "const": "FeedbackSubmit"
             },
             "label": {
-              "$ref": "https://a2ui.org/specification/v0_10/common_types.json#/$defs/DynamicString",
+              "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/DynamicString",
               "description": "Button text. Defaults to \"Submit feedback\"."
             },
             "weight": {
@@ -594,7 +709,36 @@
           },
           "required": ["component"]
         }
+      ],
+      "unevaluatedProperties": false
+    }
+  },
+  "$defs": {
+    "anyComponent": {
+      "oneOf": [
+        { "$ref": "#/components/Text" },
+        { "$ref": "#/components/Row" },
+        { "$ref": "#/components/Column" },
+        { "$ref": "#/components/MediaRenderer" },
+        { "$ref": "#/components/Card" },
+        { "$ref": "#/components/Icon" },
+        { "$ref": "#/components/StatCard" },
+        { "$ref": "#/components/DataTable" },
+        { "$ref": "#/components/TimelineChart" },
+        { "$ref": "#/components/TreeView" },
+        { "$ref": "#/components/TreeNode" },
+        { "$ref": "#/components/Markdown" },
+        { "$ref": "#/components/KeyValueViewer" },
+        { "$ref": "#/components/AssessmentCard" },
+        { "$ref": "#/components/AssessmentBoard" },
+        { "$ref": "#/components/FeedbackThumbsUpDownButtons" },
+        { "$ref": "#/components/RadioGroup" },
+        { "$ref": "#/components/FeedbackInputText" },
+        { "$ref": "#/components/FeedbackSubmit" }
+      ],
+      "discriminator": {
+        "propertyName": "component"
       }
-    ]
+    }
   }
 }

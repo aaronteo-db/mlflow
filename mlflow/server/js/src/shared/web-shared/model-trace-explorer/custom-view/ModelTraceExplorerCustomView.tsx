@@ -29,7 +29,11 @@ import { AssessmentBoard } from './catalog-primitives/AssessmentBoard';
 import { AssessmentCard } from './catalog-primitives/AssessmentCard';
 import { Card } from './catalog-primitives/Card';
 import { DataTable } from './catalog-primitives/DataTable';
-import { DEFAULT_FEEDBACK_NAME, FEEDBACK_SUBMITTED, FeedbackButtons } from './catalog-primitives/FeedbackButtons';
+import {
+  DEFAULT_FEEDBACK_NAME,
+  FEEDBACK_SUBMITTED,
+  FeedbackThumbsUpDownButtons,
+} from './catalog-primitives/FeedbackThumbsUpDownButtons';
 import { FEEDBACK_STAGED, FEEDBACK_SUBMIT_ALL, type StagedFeedbackContext } from './catalog-primitives/feedbackActions';
 import { FeedbackInputText } from './catalog-primitives/FeedbackInputText';
 import { FeedbackSubmit } from './catalog-primitives/FeedbackSubmit';
@@ -139,7 +143,7 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
           AssessmentBoard,
           AssessmentCard,
           KeyValueViewer,
-          FeedbackButtons,
+          FeedbackThumbsUpDownButtons,
           RadioGroup,
           FeedbackInputText,
           FeedbackSubmit,

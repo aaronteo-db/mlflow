@@ -4,21 +4,9 @@ import { Typography } from '@databricks/design-system';
 
 /**
  * Custom Text primitive that overrides the basic catalog's Text.
- *
- * The basic catalog's Text renders `variant` by prepending raw Markdown
- * (`#### heading`, `*caption*`) and relies on a Markdown renderer hook that we
- * never register in this catalog — so headings/captions showed up as literal
- * `####` / `*...*`. We map `variant` to Databricks Design System Typography
- * instead, so headings render as real sized text natively in the MLflow UI.
- *
- * Note: this renders plain text (no inline Markdown). For bold/italic/lists or
- * multi-line rich text, authors should use the dedicated `Markdown` component.
  */
 const asString = (value: unknown): string => (typeof value === 'string' ? value : String(value ?? ''));
 
-// The DS Title levels run small (level 4 ≈ 16px, only ~2px above body), so a
-// card title rendered as h4 barely stands out. We map each heading variant to
-// an explicit, more comfortable size/weight so titles read as real headings.
 const HEADING_STYLE: Record<string, { fontSize: number; lineHeight: string; fontWeight: number }> = {
   h1: { fontSize: 32, lineHeight: '40px', fontWeight: 700 },
   h2: { fontSize: 26, lineHeight: '34px', fontWeight: 700 },

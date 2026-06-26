@@ -21,7 +21,7 @@ const PanelItemSchema = z
     type: z
       .enum(['input', 'output', 'attributes', 'markdown', 'feedback', 'rating', 'rationale', 'submit'])
       .describe(
-        "input/output/attributes -> host renders the span field as a KeyValueViewer; markdown -> a Markdown block; feedback -> thumbs up/down FeedbackButtons scoped to this node's span (logs immediately); rating -> a RadioGroup of options; rationale -> a free-text box paired to a rating with the same name; submit -> a button that logs all staged rating/rationale on this view. Use rating(+rationale)+submit for multi-option ratings, feedback for a quick thumb.",
+        "input/output/attributes -> host renders the span field as a KeyValueViewer; markdown -> a Markdown block; feedback -> thumbs up/down FeedbackThumbsUpDownButtons scoped to this node's span (logs immediately); rating -> a RadioGroup of options; rationale -> a free-text box paired to a rating with the same name; submit -> a button that logs all staged rating/rationale on this view. Use rating(+rationale)+submit for multi-option ratings, feedback for a quick thumb.",
       ),
     text: z.string().describe('Markdown body (type: markdown).').optional(),
     title: z.string().describe('Section heading (markdown) or value label override.').optional(),
@@ -65,7 +65,7 @@ export const TreeNodeApi = {
       panelItems: z
         .array(PanelItemSchema)
         .describe(
-          'Directives for the side panel shown when this node is selected. The host builds the actual components (KeyValueViewer / Markdown / FeedbackButtons) from the span data.',
+          'Directives for the side panel shown when this node is selected. The host builds the actual components (KeyValueViewer / Markdown / FeedbackThumbsUpDownButtons) from the span data.',
         )
         .optional(),
       children: ChildListSchema.describe('Nested TreeNode ids, rendered indented below this node.').optional(),

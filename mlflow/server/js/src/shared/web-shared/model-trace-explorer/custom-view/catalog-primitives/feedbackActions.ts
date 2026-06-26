@@ -1,6 +1,6 @@
 /**
  * Shared action names for the staged-feedback primitives (RadioGroup,
- * FeedbackInputText, FeedbackSubmit). Unlike FeedbackButtons (which logs an
+ * FeedbackInputText, FeedbackSubmit). Unlike FeedbackThumbsUpDownButtons (which logs an
  * assessment immediately on click), these controls only STAGE their values into
  * a host-side buffer; a single FeedbackSubmit click flushes the buffer and logs
  * one MLflow assessment per dimension. Kept in their own module so every

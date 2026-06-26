@@ -371,7 +371,7 @@ const collectAttachmentUris = (value: unknown, depth = 0, acc: string[] = []): s
 // Builds the side-panel subtree for a selected TreeNode from its lightweight
 // `panelItems` directives plus the span's real data (from `nodeMap`). The author
 // /LLM only emits the directives; the host materializes the heavy components
-// (KeyValueViewer / Markdown / FeedbackButtons) here, keyed off the deterministic
+// (KeyValueViewer / Markdown / FeedbackThumbsUpDownButtons) here, keyed off the deterministic
 // `${nodeId}__panel` id the TreeView renders. For input/output items, any media
 // attachments found in the field are auto-rendered as MediaRenderers above the
 // JSON (mirroring the Details tab's Default view) so audio/images/PDFs are
@@ -429,7 +429,7 @@ export const buildSpanPanelComponents = (
         childIds.push(itemId);
         components.push({
           id: itemId,
-          component: 'FeedbackButtons',
+          component: 'FeedbackThumbsUpDownButtons',
           label: item.label || 'Was this span helpful?',
           name: item.name || 'Span helpfulness',
           ...(spanId ? { spanId } : {}),

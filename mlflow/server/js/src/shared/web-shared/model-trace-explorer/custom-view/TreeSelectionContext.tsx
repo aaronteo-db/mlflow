@@ -8,7 +8,7 @@ export const useTreeDepth = (): number => useContext(TreeDepthContext);
 
 // An author-supplied directive describing one entry in a node's side panel. The
 // host turns these into real components (KeyValueViewer / Markdown /
-// FeedbackButtons / RadioGroup / FeedbackInputText / FeedbackSubmit) on
+// FeedbackThumbsUpDownButtons / RadioGroup / FeedbackInputText / FeedbackSubmit) on
 // selection, pulling span data from its nodeMap — so the author/LLM never has to
 // emit the heavy span inputs/outputs themselves.
 export type PanelItem = {
