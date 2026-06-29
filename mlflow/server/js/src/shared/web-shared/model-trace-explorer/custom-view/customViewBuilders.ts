@@ -159,6 +159,31 @@ export const getTimelineRowsFromNodes = (topLevelNodes: ModelTraceSpanNode[]): T
   return rows;
 };
 
+// Builds timeline rows directly from the nodeMap, optionally restricted to a
+// single span type (e.g. only TOOL spans). Bars are flattened (depth 0) and
+// positioned against the GLOBAL trace start (min start across ALL spans) so a
+// filtered bar still sits at its true position on the trace timeline. Used by
+// the binder to honor a `filterType` on the `timelineRows` source.
+export const getTimelineRowsFromNodeMap = (
+  nodeMap: Record<string, ModelTraceSpanNode>,
+  filterType?: string,
+): TimelineRow[] => {
+  const nodes = Object.values(nodeMap);
+  if (nodes.length === 0) {
+    return [];
+  }
+  const traceStartUs = Math.min(...nodes.map((node) => node.start));
+  return nodes
+    .filter((node) => (filterType ? node.type === filterType : true))
+    .sort((a, b) => a.start - b.start)
+    .map((node) => ({
+      label: typeof node.title === 'string' ? node.title : String(node.title ?? 'unknown'),
+      start: (node.start - traceStartUs) / 1000,
+      end: (node.end - traceStartUs) / 1000,
+      depth: 0,
+    }));
+};
+
 // Maps the span tree into generic TreeView nodes. We reuse the trace explorer's
 // own icon mapping (getIconTypeForSpan) and log-level/exception helpers so the
 // tree matches the Details & Timeline view, and stash the filterable fields in
@@ -477,4 +502,90 @@ export const buildSpanPanelComponents = (
   });
 
   return [{ id: panelRootId, component: 'Column', children: childIds }, ...components];
+};
+
+// Materializes a `{ "$source": "spanTree" }` marker into concrete `TreeNode`
+// components for the CURRENT trace (one per span), returning the root child ids
+// to place into the host `TreeView`'s `children` and the component list to
+// append. The same `panelItems` directives are attached to every node so the
+// host can build each span's side panel on selection (from the live nodeMap).
+// When `filterType` is set, the tree is flattened to only spans of that type
+// (a flat list, no nesting) — the binding-layer equivalent of the prompt's
+// "only tool calls" subset filtering.
+export const buildTreeNodeComponents = (
+  treeNodes: TreeNodeData[],
+  panelItems: PanelItem[],
+  { idPrefix, filterType }: { idPrefix: string; filterType?: string },
+): { childIds: string[]; components: Record<string, unknown>[] } => {
+  const components: Record<string, unknown>[] = [];
+  const panel = Array.isArray(panelItems) && panelItems.length > 0 ? panelItems : undefined;
+
+  const makeComponent = (node: TreeNodeData, id: string): Record<string, unknown> => ({
+    id,
+    component: 'TreeNode',
+    label: node.label,
+    icon: node.icon,
+    ...(node.hasException ? { hasException: true } : {}),
+    ...(node.isRootSpan ? { isRootSpan: true } : {}),
+    ...(node.badge ? { badge: node.badge } : {}),
+    spanId: node.id,
+    ...(panel ? { panelItems: panel } : {}),
+  });
+
+  if (filterType) {
+    const flat: TreeNodeData[] = [];
+    const collect = (node: TreeNodeData) => {
+      if (node.attributes?.type === filterType) {
+        flat.push(node);
+      }
+      (node.children ?? []).forEach(collect);
+    };
+    treeNodes.forEach(collect);
+    const childIds = flat.map((node, index) => {
+      const id = `${idPrefix}-${index}`;
+      components.push(makeComponent(node, id));
+      return id;
+    });
+    return { childIds, components };
+  }
+
+  // Push each node BEFORE its children so parents always precede children in the
+  // component list (the processor expects parents first).
+  const build = (node: TreeNodeData, path: string): string => {
+    const id = `${idPrefix}-${path}`;
+    const component = makeComponent(node, id);
+    components.push(component);
+    const childIds = (node.children ?? []).map((child, index) => build(child, `${path}-${index}`));
+    if (childIds.length > 0) {
+      component.children = childIds;
+    }
+    return id;
+  };
+
+  const childIds = treeNodes.map((node, index) => build(node, String(index)));
+  return { childIds, components };
+};
+
+// Materializes a `{ "$source": "assessments" }` marker into one `AssessmentCard`
+// per assessment for the CURRENT trace, returning the child ids to place into
+// the host `AssessmentBoard`'s `children` and the components to append.
+export const buildAssessmentCardComponents = (
+  items: AssessmentBoardItem[],
+  { idPrefix }: { idPrefix: string },
+): { childIds: string[]; components: Record<string, unknown>[] } => {
+  const components: Record<string, unknown>[] = [];
+  const childIds = items.map((item, index) => {
+    const id = `${idPrefix}-card-${index}`;
+    components.push({
+      id,
+      component: 'AssessmentCard',
+      name: item.name,
+      ...(item.value !== undefined ? { value: item.value } : {}),
+      ...(item.rationale !== undefined ? { rationale: item.rationale } : {}),
+      ...(item.source !== undefined ? { source: item.source } : {}),
+      sentiment: item.sentiment,
+    });
+    return id;
+  });
+  return { childIds, components };
 };

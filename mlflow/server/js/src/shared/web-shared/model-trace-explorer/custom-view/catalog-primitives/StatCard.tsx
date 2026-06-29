@@ -46,6 +46,7 @@ export const StatCardApi = {
         .default('info')
         .describe('The color tone applied to the icon (info/success/warning/danger).')
         .optional(),
+      weight: z.number().describe('Relative flex weight when placed directly inside a Row/Column.').optional(),
     })
     .strict(),
 } satisfies ComponentApi;
@@ -57,6 +58,7 @@ export const StatCard = createComponentImplementation(StatCardApi, ({ props }) =
   const label = typeof props.label === 'string' ? props.label : String(props.label ?? '');
   const tone: Tone = (props.tone as Tone) ?? 'info';
   const iconName: IconName = (props.icon as IconName) ?? 'wrench';
+  const weight = typeof props.weight === 'number' ? props.weight : undefined;
 
   const toneColor: Record<Tone, string> = {
     info: theme.colors.blue500,
@@ -79,7 +81,7 @@ export const StatCard = createComponentImplementation(StatCardApi, ({ props }) =
         backgroundColor: theme.colors.backgroundPrimary,
         borderRadius: theme.borders.borderRadiusMd,
         border: `1px solid ${theme.colors.border}`,
-        flex: 1,
+        flex: weight ?? 1,
         minWidth: 160,
       }}
     >

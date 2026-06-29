@@ -50,7 +50,8 @@ import { type PanelItem } from './TreeSelectionContext';
 import { TreeNode } from './catalog-primitives/TreeNode';
 import { TREE_NODE_SELECTED, TreeView } from './catalog-primitives/TreeView';
 import type { AgentNode } from './agent/buildAgentPrompt';
-import { validateAndPrepareMessages } from './agent/validateA2uiMessages';
+import { validateAndPrepareMessages, validateTemplate } from './agent/validateA2uiMessages';
+import { resolveTemplate } from './resolveTemplate';
 import { useCustomViewAssistantBridge } from './assistant/useCustomViewAssistantBridge';
 import {
   CUSTOM_VIEW_CATALOG_ID,
@@ -62,7 +63,6 @@ import {
   getTimelineRowsFromNodes,
   getToolRowsFromNodeMap,
   getTreeNodesFromNodes,
-  stampTemplateOnSurface,
 } from './customViewBuilders';
 import { type CustomView } from './customViewDefinition';
 import { useCustomViewDefinitionState, useOptionalCustomViewDefinition } from './CustomViewDefinitionContext';
@@ -81,18 +81,18 @@ const placeholderMessages = (surfaceId: string, text: string): A2uiMessage[] => 
   { version: 'v0.9', updateComponents: { surfaceId, components: [{ id: 'root', component: 'Text', text }] } },
 ];
 
-// Host-rendered loading state shown in a panel body while MLflow Assistant
-// regenerates the view for the active trace. The skeleton bars approximate a
-// generic dashboard layout so the panel doesn't collapse to a single line.
+// Host-rendered loading state shown in the empty state while MLflow Assistant
+// streams the FIRST authoring reply (before any view exists). Per-trace cycling
+// re-binds host-side with no LLM call, so there is no per-trace loading state.
 const CustomViewGeneratingSkeleton = () => {
   const { theme } = useDesignSystemTheme();
   return (
     <div
       role="status"
-      aria-label="Generating this view for the current trace"
+      aria-label="Building this custom view"
       css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.md }}
     >
-      <Typography.Text color="secondary">Generating this view for the current trace…</Typography.Text>
+      <Typography.Text color="secondary">Building this custom view…</Typography.Text>
       <div css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm }}>
         <GenericSkeleton style={{ height: 24, width: '40%' }} />
         <GenericSkeleton style={{ height: 72 }} />
@@ -172,11 +172,13 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     Map<string, { nodeId: string; spanId?: string; panelItems: PanelItem[]; traceId: string }>
   >(new Map());
 
-  // Staged-but-unsubmitted feedback per surface, keyed by assessment name. The
-  // RadioGroup / FeedbackInputText primitives merge their value/rationale here
-  // (no POST); FeedbackSubmit flushes the surface's entries into assessments.
+  // Staged-but-unsubmitted feedback per surface, keyed by `name` + `spanId` so
+  // the same assessment dimension rated on two different spans (e.g. "Accuracy"
+  // on two tool cards) does not collide. The RadioGroup / FeedbackInputText
+  // primitives merge their value/rationale here (no POST); FeedbackSubmit
+  // flushes the surface's entries into assessments.
   const pendingFeedbackRef = useRef<
-    Map<string, Map<string, { value?: string; rationale?: string; spanId?: string }>>
+    Map<string, Map<string, { name: string; value?: string; rationale?: string; spanId?: string }>>
   >(new Map());
 
   const handleFeedbackAction = (action: A2uiClientAction) => {
@@ -227,12 +229,16 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       surfaceBuffer = new Map();
       pendingFeedbackRef.current.set(action.surfaceId, surfaceBuffer);
     }
-    const previous = surfaceBuffer.get(name) ?? {};
-    surfaceBuffer.set(name, {
+    const spanId = typeof context.spanId === 'string' && context.spanId ? context.spanId : undefined;
+    // Key by name + spanId so the same dimension on different spans stays distinct.
+    const bufferKey = `${name}\u0000${spanId ?? ''}`;
+    const previous = surfaceBuffer.get(bufferKey) ?? { name };
+    surfaceBuffer.set(bufferKey, {
       ...previous,
+      name,
       ...(typeof context.value === 'string' ? { value: context.value } : {}),
       ...(typeof context.rationale === 'string' ? { rationale: context.rationale } : {}),
-      ...(typeof context.spanId === 'string' && context.spanId ? { spanId: context.spanId } : {}),
+      ...(spanId ? { spanId } : {}),
     });
   };
 
@@ -245,7 +251,7 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       return;
     }
     let submitted = 0;
-    for (const [name, entry] of surfaceBuffer.entries()) {
+    for (const entry of surfaceBuffer.values()) {
       const hasValue = typeof entry.value === 'string' && entry.value.length > 0;
       const hasRationale = typeof entry.rationale === 'string' && entry.rationale.length > 0;
       if (!hasValue && !hasRationale) {
@@ -254,7 +260,7 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       const feedbackValue: { feedback: Feedback } = { feedback: { value: hasValue ? entry.value! : null } };
       createAssessmentMutation({
         assessment: {
-          assessment_name: name,
+          assessment_name: entry.name,
           trace_id: traceId,
           source: { source_type: 'HUMAN', source_id: getUser() ?? '' },
           ...(entry.spanId ? { span_id: entry.spanId } : {}),
@@ -354,19 +360,6 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
   const [nameInput, setNameInput] = useState(DEFAULT_NEW_VIEW_NAME);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
 
-  // Per-(trace, view) cache of Assistant-generated templates. Every view is
-  // regenerated per trace, so this caches each trace's generated spec (keyed by
-  // `${traceId}::${viewId}`) — revisiting a trace renders instantly with no
-  // further LLM call (until the user edits the view).
-  const regenCacheRef = useRef<Map<string, A2uiMessage[]>>(new Map());
-  const regenInFlightRef = useRef<Set<string>>(new Set());
-  // Cancel handles for in-flight headless regenerations, keyed by cacheKey, so we
-  // can abort stale requests when the user cycles to a different trace.
-  const regenCancelsRef = useRef<Map<string, () => void>>(new Map());
-  const [regenErrors, setRegenErrors] = useState<Record<string, string>>({});
-  // Bumped whenever a background regeneration resolves so the rebuild effect re-runs.
-  const [regenVersion, setRegenVersion] = useState(0);
-
   // The set of surfaceIds we've created, so we can delete the ones whose views
   // are no longer active.
   const managedSurfacesRef = useRef<Set<string>>(new Set());
@@ -388,41 +381,33 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
   // rebuild (no loop).
   const [, refreshSurfaces] = useReducer((tick: number) => tick + 1, 0);
 
-  // Drops all cached per-trace regenerations for a view whose design changed, so
-  // other traces re-generate against the new spec instead of showing stale UI.
-  const purgeRegenForView = (viewId: string) => {
-    const suffix = `::${viewId}`;
-    for (const key of Array.from(regenCacheRef.current.keys())) {
-      if (key.endsWith(suffix)) {
-        regenCacheRef.current.delete(key);
-      }
-    }
-    setRegenErrors((prev) => {
-      const next = { ...prev };
-      for (const key of Object.keys(next)) {
-        if (key.endsWith(suffix)) {
-          delete next[key];
-        }
-      }
-      return next;
-    });
-  };
-
   // Parses + validates a raw JSON spec (captured from an MLflow Assistant reply)
-  // into a processor-ready template. Throws a descriptive Error on failure.
-  const prepareTemplateFromJson = (jsonText: string, viewId: string): A2uiMessage[] => {
+  // into a stored, trace-agnostic BOUND TEMPLATE (markers preserved). Throws a
+  // descriptive Error on failure. The template is re-bound per trace at render
+  // time by `resolveTemplateForTrace` — no further LLM call.
+  const prepareTemplateFromJson = (jsonText: string): A2uiMessage[] => {
     let parsed: unknown;
     try {
       parsed = JSON.parse(jsonText);
     } catch {
       throw new Error('The assistant did not return valid JSON.');
     }
-    const result = validateAndPrepareMessages(parsed, {
-      surfaceId: `cv-template-${viewId}`,
-      catalogId: CUSTOM_VIEW_CATALOG_ID,
-    });
+    const result = validateTemplate(parsed);
     if (!result.ok) {
       throw new Error(result.error);
+    }
+    return result.messages;
+  };
+
+  // Re-binds a stored template to the CURRENT trace: resolves every $source /
+  // $spanRef marker against this trace's data, then strict-validates the resolved
+  // components and stamps the host surface id. Falls back to an inline error
+  // placeholder if the resolved stream fails validation. NO LLM call.
+  const resolveTemplateForTrace = (template: A2uiMessage[], surfaceId: string): A2uiMessage[] => {
+    const resolved = resolveTemplate(template, { viewData, nodeMap });
+    const result = validateAndPrepareMessages(resolved, { surfaceId, catalogId: CUSTOM_VIEW_CATALOG_ID });
+    if (!result.ok) {
+      return placeholderMessages(surfaceId, `Could not render this view for the current trace: ${result.error}`);
     }
     return result.messages;
   };
@@ -446,11 +431,11 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
   };
 
   // All custom-view authoring goes through MLflow Assistant: the empty-state box
-  // and the "Edit" button open the assistant chat (frontend-capture via onSpec),
-  // and `requestSpec` drives a silent headless call for per-trace regeneration.
-  // Each spec targets the SINGLE active view: the first spec creates it, later
-  // specs edit it (same id / surface). The user-provided `name` is preserved;
-  // the assistant only sets the panel `label` (its `{title}`).
+  // and the "Edit" button open the assistant chat (frontend-capture via onSpec).
+  // The assistant authors a trace-agnostic BOUND TEMPLATE once; cycling traces
+  // re-binds it host-side with no further LLM call. Each spec targets the SINGLE
+  // active view: the first spec creates it, later specs edit it (same id). The
+  // user-provided `name` is preserved; the assistant only sets the panel `label`.
   const assistant = useCustomViewAssistantBridge({
     data: agentData,
     currentTemplate: activeView?.template,
@@ -459,7 +444,7 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       const id = active?.id ?? draftViewIdRef.current ?? nextViewId();
       draftViewIdRef.current = id;
       try {
-        const template = prepareTemplateFromJson(jsonText, id);
+        const template = prepareTemplateFromJson(jsonText);
         // Prefer the LLM-chosen title for the panel label; keep the prior label
         // on an edit that omits one; fall back to the raw request for a brand-new
         // untitled view.
@@ -469,10 +454,6 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
         // until the first save prompts for one.
         const name = active?.name ?? cv.draftName ?? '';
         const createdAtMs = active?.createdAtMs ?? Date.now();
-        // The design changed, so any cached per-trace regenerations are stale;
-        // seed the cache for the current trace so it renders immediately.
-        purgeRegenForView(id);
-        regenCacheRef.current.set(`${traceId}::${id}`, template);
         cv.upsertViewContent({ id, name, label, instruction: assistantInstruction, template, createdAtMs });
         return undefined;
       } catch (error) {
@@ -481,26 +462,16 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     },
   });
 
-  // When the user cycles to a different trace, abort any in-flight headless
-  // regeneration for the previous trace (its result is no longer relevant).
+  // Staged-but-unsubmitted feedback is scoped to the trace it was entered on;
+  // drop it when cycling so it never leaks onto a different trace's surface.
   useEffect(() => {
-    const prefix = `${traceId}::`;
-    for (const [key, cancel] of Array.from(regenCancelsRef.current.entries())) {
-      if (!key.startsWith(prefix)) {
-        cancel();
-        regenCancelsRef.current.delete(key);
-        regenInFlightRef.current.delete(key);
-      }
-    }
-    // Staged-but-unsubmitted feedback is scoped to the trace it was entered on;
-    // drop it when cycling so it never leaks onto a different trace's surface.
     pendingFeedbackRef.current.clear();
   }, [traceId]);
 
-  // Rebuild the active view's surface whenever the active view or the trace
-  // changes: it uses its cached per-trace template, or asks MLflow Assistant to
-  // (re)generate it silently in the background. Surfaces for non-active views
-  // are torn down.
+  // Rebuild the active view's surface whenever the active view, its template, or
+  // the trace changes: re-bind the stored trace-agnostic template against the
+  // CURRENT trace's data (no LLM call). Surfaces for non-active views are torn
+  // down.
   useEffect(() => {
     if (!cv.isLoaded) {
       return;
@@ -515,40 +486,6 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       }
     }
 
-    const triggerRegen = (view: CustomView, cacheKey: string) => {
-      if (regenInFlightRef.current.has(cacheKey) || regenErrors[cacheKey]) {
-        return;
-      }
-      regenInFlightRef.current.add(cacheKey);
-      // Hand the stored design back as a reference so the regenerated view keeps
-      // the same layout, but ground all data/span-ids in the CURRENT trace's
-      // snapshot (the guide tells the model not to reuse the reference's ids).
-      const { specPromise, cancel } = assistant.requestSpec({
-        instruction: view.instruction,
-        data: agentData,
-        referenceTemplate: view.template,
-      });
-      regenCancelsRef.current.set(cacheKey, cancel);
-      specPromise
-        .then((specJson) => {
-          const template = prepareTemplateFromJson(specJson, view.id);
-          regenCacheRef.current.set(cacheKey, template);
-          setRegenVersion((version) => version + 1);
-        })
-        .catch((error) => {
-          setRegenErrors((prev) => ({
-            ...prev,
-            [cacheKey]: error instanceof Error ? error.message : 'Failed to generate view for this trace.',
-          }));
-          // Re-run the rebuild so the panel's placeholder shows the error.
-          setRegenVersion((version) => version + 1);
-        })
-        .finally(() => {
-          regenInFlightRef.current.delete(cacheKey);
-          regenCancelsRef.current.delete(cacheKey);
-        });
-    };
-
     for (const view of panelsToRender) {
       const surfaceId = surfaceIdForView(view);
       // Delete any prior contents so the surface rebinds cleanly to this trace.
@@ -556,26 +493,10 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
         processor.processMessages([{ version: 'v0.9', deleteSurface: { surfaceId } }]);
       }
 
-      let messages: A2uiMessage[];
-      const cacheKey = `${traceId}::${view.id}`;
-      const cached = regenCacheRef.current.get(cacheKey);
-      if (cached) {
-        messages = stampTemplateOnSurface(cached, surfaceId);
-      } else if (regenErrors[cacheKey]) {
-        messages = placeholderMessages(surfaceId, `Could not generate this view: ${regenErrors[cacheKey]}`);
-      } else if (!assistant.isAvailable) {
-        // The stored template carries the data of the trace it was authored on, so
-        // rendering it for a different trace would show mismatched values with no
-        // way to regenerate. Without the assistant we can't rebuild for THIS trace,
-        // so show an explicit unavailable state instead of misleading stale data.
-        messages = placeholderMessages(
-          surfaceId,
-          'MLflow Assistant is unavailable, so this view can’t be generated for the current trace. Reconnect MLflow Assistant to render it.',
-        );
-      } else {
-        messages = placeholderMessages(surfaceId, 'Generating this view for the current trace…');
-        triggerRegen(view, cacheKey);
-      }
+      const messages =
+        view.template && view.template.length > 0
+          ? resolveTemplateForTrace(view.template, surfaceId)
+          : placeholderMessages(surfaceId, 'This view has no content yet. Edit it with MLflow Assistant.');
 
       processor.processMessages(messages);
       managedSurfacesRef.current.add(surfaceId);
@@ -601,7 +522,7 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     // panel renders its latest content rather than a deleted/stale surface.
     refreshSurfaces();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView, cv.isLoaded, viewData, traceId, regenVersion, processor, assistant.isAvailable]);
+  }, [activeView, cv.isLoaded, viewData, nodeMap, traceId, processor]);
 
   // Opens MLflow Assistant with the typed prompt as its first message; the reply
   // is captured by the bridge and applied via onSpec. Used by the empty/draft
@@ -676,18 +597,11 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     if (!id) {
       return;
     }
-    purgeRegenForView(id);
     cv.deleteView(id);
     setDeleteModalOpen(false);
   };
 
   const views = cv.views;
-  const cacheKey = activeView ? `${traceId}::${activeView.id}` : '';
-  // Mirrors the rebuild effect's placeholder branch: a view is still generating
-  // when the assistant is available but we have neither a cached render nor an
-  // error for this trace yet.
-  const isGenerating =
-    Boolean(activeView) && assistant.isAvailable && !regenCacheRef.current.get(cacheKey) && !regenErrors[cacheKey];
 
   return (
     <div
@@ -900,11 +814,7 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
                   </Typography.Title>
                 </div>
                 <div css={{ padding: theme.spacing.md }}>
-                  {isGenerating ? (
-                    <CustomViewGeneratingSkeleton />
-                  ) : (
-                    surface && <A2uiSurface key={`${surfaceId}-${traceId}`} surface={surface} />
-                  )}
+                  {surface && <A2uiSurface key={`${surfaceId}-${traceId}`} surface={surface} />}
                 </div>
               </div>
             );

@@ -20,15 +20,14 @@ export const CUSTOM_VIEW_DEFINITION_VERSION = 1 as const;
 //    button and is never overwritten by the assistant.
 //  - `label` is the LLM-generated surface title (from the assistant `{title}`)
 //    shown as the panel header inside the rendered view.
-//  - `template` is the most recent Assistant-generated A2UI spec. It serves as
-//    the design reference handed back to the Assistant when regenerating for
-//    another trace, and the instant cache seed for the trace it was authored on.
-//    It is NOT used as an offline render — when the Assistant is unavailable the
-//    host shows an explicit "view can't be generated" placeholder rather than
-//    this template (which holds the authoring trace's data and would mismatch
-//    the open trace).
-//  - `instruction` is the latest natural-language request (the human intent)
-//    replayed alongside the reference template on regeneration.
+//  - `template` is the Assistant-authored, trace-agnostic A2UI BOUND TEMPLATE:
+//    a layout whose data-bearing props are `$source` / `$spanRef` markers rather
+//    than literal trace data. The host re-binds it to each cycled trace via
+//    `resolveTemplate` (no further LLM call), so it renders correctly for any
+//    trace. Legacy data-baked templates (no markers) pass through the binder
+//    unchanged and render with their authoring trace's data until re-edited.
+//  - `instruction` is the latest natural-language request (the human intent),
+//    re-sent to the Assistant as context when the user edits the view.
 //  - `createdAtMs` orders the switcher and picks the default-on-load view.
 export type CustomView = {
   id: string;

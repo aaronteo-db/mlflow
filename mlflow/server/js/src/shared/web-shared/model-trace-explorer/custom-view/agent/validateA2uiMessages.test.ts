@@ -1,6 +1,6 @@
 import { describe, test, expect } from '@jest/globals';
 
-import { validateAndPrepareMessages } from './validateA2uiMessages';
+import { validateAndPrepareMessages, validateTemplate } from './validateA2uiMessages';
 
 const PREP = { surfaceId: 'surface-x', catalogId: 'catalog-x' };
 
@@ -88,5 +88,66 @@ describe('validateAndPrepareMessages', () => {
       return;
     }
     expect(result.error).toContain('child');
+  });
+});
+
+describe('validateTemplate', () => {
+  const wrap = (components: unknown[]) => ({
+    messages: [{ version: 'v0.9', updateComponents: { surfaceId: 'main', components } }],
+  });
+
+  test('accepts $source and $spanRef markers and preserves them', () => {
+    const raw = wrap([
+      { id: 'root', component: 'Column', children: ['stat', 'tree', 'fb'] },
+      { id: 'stat', component: 'StatCard', value: { $source: 'metrics.latency' }, label: 'Latency' },
+      { id: 'tree', component: 'TreeView', children: { $source: 'spanTree', panelItems: [{ type: 'input' }] } },
+      { id: 'fb', component: 'FeedbackThumbsUpDownButtons', name: 'Helpful', spanId: { $spanRef: { type: 'TOOL' } } },
+    ]);
+    const result = validateTemplate(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    const stat = getComponents(result.messages).find((c) => c.id === 'stat');
+    // The marker is kept intact (not resolved) for later per-trace binding.
+    expect(stat?.value).toEqual({ $source: 'metrics.latency' });
+  });
+
+  test('rejects an unknown $source name', () => {
+    const result = validateTemplate(
+      wrap([{ id: 'root', component: 'StatCard', value: { $source: 'metrics.bogus' }, label: 'X' }]),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.error).toContain('metrics.bogus');
+  });
+
+  test('rejects an invalid $spanRef selector', () => {
+    const result = validateTemplate(
+      wrap([{ id: 'root', component: 'RadioGroup', name: 'X', options: [], spanId: { $spanRef: { nth: 2 } } }]),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.error).toContain('$spanRef');
+  });
+
+  test('rejects trace-specific narrative (#span: deeplinks)', () => {
+    const result = validateTemplate(
+      wrap([{ id: 'root', component: 'Markdown', text: 'The agent called [run_sql_query](#span:span-1).' }]),
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(result.error).toContain('#span:');
+  });
+
+  test('requires a root component', () => {
+    const result = validateTemplate(wrap([{ id: 'stat', component: 'StatCard', value: { $source: 'metrics.status' }, label: 'X' }]));
+    expect(result.ok).toBe(false);
   });
 });
