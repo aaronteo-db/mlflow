@@ -87,14 +87,34 @@ export const RadioGroup = createComponentImplementation(RadioGroupApi, ({ props,
         value={selected}
         onChange={(event) => select(asString(event.target.value))}
       >
-        {options.map((option, index) => {
-          const optionValue = asString(option?.value);
-          return (
-            <Radio key={`${optionValue}-${index}`} value={optionValue}>
-              {asString(option?.label) || optionValue}
-            </Radio>
-          );
-        })}
+        {/* A2UI's Radio.Group renders via React context, so wrapping options in
+            extra elements doesn't break selection — it just lets us give each
+            option its own bordered, rounded tile. */}
+        <div css={{ display: 'flex', flexDirection: 'column', gap: theme.spacing.sm }}>
+          {options.map((option, index) => {
+            const optionValue = asString(option?.value);
+            const isSelected = selected === optionValue;
+            return (
+              <div
+                key={`${optionValue}-${index}`}
+                onClick={() => select(optionValue)}
+                css={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  cursor: 'pointer',
+                  padding: `${theme.spacing.sm}px ${theme.spacing.md}px`,
+                  borderRadius: theme.borders.borderRadiusMd,
+                  backgroundColor: theme.colors.backgroundPrimary,
+                  border: `1px solid ${isSelected ? theme.colors.actionPrimaryBackgroundDefault : theme.colors.border}`,
+                }}
+              >
+                <Radio value={optionValue} css={{ width: '100%', marginRight: 0 }}>
+                  {asString(option?.label) || optionValue}
+                </Radio>
+              </div>
+            );
+          })}
+        </div>
       </Radio.Group>
     </div>
   );

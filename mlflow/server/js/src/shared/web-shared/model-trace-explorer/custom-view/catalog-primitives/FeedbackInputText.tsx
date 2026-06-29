@@ -88,6 +88,7 @@ export const FeedbackInputText = createComponentImplementation(FeedbackInputText
         placeholder={placeholder}
         value={text}
         autoSize={{ minRows: 2, maxRows: 6 }}
+        css={{ backgroundColor: theme.colors.backgroundPrimary }}
         onKeyDown={(event) => event.stopPropagation()}
         onChange={(event) => setText(event.target.value)}
         onBlur={(event) => stage(event.target.value)}

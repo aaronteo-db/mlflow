@@ -9,6 +9,7 @@ import {
   GenericSkeleton,
   Input,
   Modal,
+  OverflowIcon,
   PlusIcon,
   SparkleDoubleIcon,
   TrashIcon,
@@ -380,15 +381,6 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
     draftViewIdRef.current = cv.activeViewId;
   }, [cv.activeViewId]);
 
-  // Per-(trace, view) snapshot of the render of the SAVED design — captured while
-  // a view is clean (persisted + no unsaved edits). Reset restores from here so
-  // undoing edits is instant (no LLM call) for traces already rendered.
-  const savedRenderRef = useRef<Map<string, A2uiMessage[]>>(new Map());
-  // True only when the active view is persisted and has no unsaved edits, so a
-  // render/regeneration we cache also represents the saved design.
-  const activeCleanRef = useRef(false);
-  activeCleanRef.current = cv.isActivePersisted && !cv.isDirty;
-
   // The rebuild effect mutates the processor model AFTER render (creating new
   // surface objects). `A2uiSurface` binds to a specific surface instance, so we
   // force one render afterwards to re-read the current surfaces. This tick is
@@ -414,60 +406,6 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       }
       return next;
     });
-  };
-
-  // Re-baseline the saved-render snapshot for a view from the current cache (used
-  // on save, when the now-edited render becomes the saved design). Drops stale
-  // snapshots for other traces; they repopulate as those traces render clean.
-  const baselineSavedRendersForView = (viewId: string) => {
-    const suffix = `::${viewId}`;
-    for (const key of Array.from(savedRenderRef.current.keys())) {
-      if (key.endsWith(suffix)) {
-        savedRenderRef.current.delete(key);
-      }
-    }
-    for (const [key, messages] of Array.from(regenCacheRef.current.entries())) {
-      if (key.endsWith(suffix)) {
-        savedRenderRef.current.set(key, messages);
-      }
-    }
-  };
-
-  // Restore the saved-design renders for a view into the live cache (used on
-  // Reset). Drops the current edited renders first, then re-seeds from the
-  // snapshot, so traces already rendered revert instantly without an LLM call;
-  // traces with no snapshot fall back to a lazy regeneration on visit.
-  const restoreSavedRendersForView = (viewId: string) => {
-    const suffix = `::${viewId}`;
-    for (const key of Array.from(regenCacheRef.current.keys())) {
-      if (key.endsWith(suffix)) {
-        regenCacheRef.current.delete(key);
-      }
-    }
-    for (const [key, messages] of Array.from(savedRenderRef.current.entries())) {
-      if (key.endsWith(suffix)) {
-        regenCacheRef.current.set(key, messages);
-      }
-    }
-    setRegenErrors((prev) => {
-      const next = { ...prev };
-      for (const key of Object.keys(next)) {
-        if (key.endsWith(suffix)) {
-          delete next[key];
-        }
-      }
-      return next;
-    });
-  };
-
-  // Forget the saved-render snapshots for a view (used on delete).
-  const clearSavedRendersForView = (viewId: string) => {
-    const suffix = `::${viewId}`;
-    for (const key of Array.from(savedRenderRef.current.keys())) {
-      if (key.endsWith(suffix)) {
-        savedRenderRef.current.delete(key);
-      }
-    }
   };
 
   // Parses + validates a raw JSON spec (captured from an MLflow Assistant reply)
@@ -595,11 +533,6 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
         .then((specJson) => {
           const template = prepareTemplateFromJson(specJson, view.id);
           regenCacheRef.current.set(cacheKey, template);
-          // A regeneration produced while the view is clean IS the saved design's
-          // render for this trace; remember it so Reset can restore it instantly.
-          if (activeCleanRef.current) {
-            savedRenderRef.current.set(cacheKey, template);
-          }
           setRegenVersion((version) => version + 1);
         })
         .catch((error) => {
@@ -628,10 +561,6 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       const cached = regenCacheRef.current.get(cacheKey);
       if (cached) {
         messages = stampTemplateOnSurface(cached, surfaceId);
-        // Cached render of a clean view doubles as the saved-design snapshot.
-        if (activeCleanRef.current) {
-          savedRenderRef.current.set(cacheKey, cached);
-        }
       } else if (regenErrors[cacheKey]) {
         messages = placeholderMessages(surfaceId, `Could not generate this view: ${regenErrors[cacheKey]}`);
       } else if (!assistant.isAvailable) {
@@ -723,9 +652,6 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       cv.startNewView(name);
       setInstruction('');
     } else {
-      if (cv.activeViewId) {
-        baselineSavedRendersForView(cv.activeViewId);
-      }
       cv.saveActiveView(name);
     }
   };
@@ -742,8 +668,6 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       setNameModalOpen(true);
       return;
     }
-    // The current render becomes the saved design; re-baseline the Reset snapshot.
-    baselineSavedRendersForView(activeView.id);
     cv.saveActiveView();
   };
 
@@ -753,25 +677,8 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
       return;
     }
     purgeRegenForView(id);
-    clearSavedRendersForView(id);
     cv.deleteView(id);
     setDeleteModalOpen(false);
-  };
-
-  const handleReset = () => {
-    const id = cv.activeViewId;
-    if (id) {
-      // A persisted view reverts to its saved design — restore the cached saved
-      // renders so the current trace snaps back instantly. A never-saved view is
-      // dropped entirely, so just clear its cache.
-      if (cv.isActivePersisted) {
-        restoreSavedRendersForView(id);
-      } else {
-        purgeRegenForView(id);
-        clearSavedRendersForView(id);
-      }
-    }
-    cv.resetActiveView();
   };
 
   const views = cv.views;
@@ -834,6 +741,17 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
           </div>
 
           <div css={{ display: 'flex', alignItems: 'center', gap: theme.spacing.sm }}>
+            {cv.canPersist && activeView && cv.isDirty && (
+              <Button
+                componentId="shared.model-trace-explorer.custom-view.save"
+                type="primary"
+                onClick={handleSave}
+                loading={cv.isSaving}
+                disabled={cv.isSaving}
+              >
+                Save
+              </Button>
+            )}
             {assistant.isAvailable && activeView && (
               <Button
                 componentId="shared.model-trace-explorer.custom-view.assistant"
@@ -843,34 +761,28 @@ export const ModelTraceExplorerCustomView = ({ modelTraceInfo }: { modelTraceInf
                 Edit with MLflow Assistant
               </Button>
             )}
-            {cv.canPersist && activeView && (
-              <Button
-                componentId="shared.model-trace-explorer.custom-view.save"
-                onClick={handleSave}
-                loading={cv.isSaving}
-                disabled={!cv.isDirty || cv.isSaving}
-              >
-                {cv.isDirty ? 'Save to experiment' : 'Saved'}
-              </Button>
-            )}
             {activeView && cv.isActivePersisted && (
-              <Button
-                componentId="shared.model-trace-explorer.custom-view.delete"
-                icon={<TrashIcon />}
-                onClick={() => setDeleteModalOpen(true)}
-                disabled={cv.isSaving}
-              >
-                Delete view
-              </Button>
-            )}
-            {(activeView || cv.isDraft) && (
-              <Button
-                componentId="shared.model-trace-explorer.custom-view.reset"
-                onClick={handleReset}
-                disabled={!cv.isDraft && !cv.isDirty}
-              >
-                Reset
-              </Button>
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger asChild>
+                  <Button
+                    componentId="shared.model-trace-explorer.custom-view.actions-menu"
+                    icon={<OverflowIcon />}
+                    aria-label="More view actions"
+                    disabled={cv.isSaving}
+                  />
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end" minWidth={160}>
+                  <DropdownMenu.Item
+                    componentId="shared.model-trace-explorer.custom-view.delete"
+                    onClick={() => setDeleteModalOpen(true)}
+                  >
+                    <DropdownMenu.IconWrapper>
+                      <TrashIcon />
+                    </DropdownMenu.IconWrapper>
+                    Delete view
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Root>
             )}
           </div>
         </div>

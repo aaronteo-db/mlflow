@@ -25,7 +25,7 @@ export type CustomViewDefinitionContextValue = {
   // Whether the active view differs from its persisted counterpart (or has none).
   isDirty: boolean;
   // Whether the active view has been persisted to the backend (false for a
-  // freshly built, never-saved view — for which Reset, not Delete, applies).
+  // freshly built, never-saved view).
   isActivePersisted: boolean;
   saveError?: string;
   selectView: (id: string) => void;
@@ -41,8 +41,6 @@ export type CustomViewDefinitionContextValue = {
   // passes the name collected from the modal).
   saveActiveView: (nameOverride?: string) => void;
   deleteView: (id: string) => void;
-  // Revert the active view's unsaved edits, or cancel an in-progress draft.
-  resetActiveView: () => void;
 };
 
 const CustomViewDefinitionContext = createContext<CustomViewDefinitionContextValue | undefined>(undefined);
@@ -165,26 +163,6 @@ export const useCustomViewDefinitionState = (
     [onDeleteView, persistedViews, views],
   );
 
-  const resetActiveView = useCallback(() => {
-    setSaveError(undefined);
-    // Cancel an in-progress draft: drop back to the first persisted view.
-    if (isDraft || !activeViewId) {
-      setIsDraft(false);
-      setDraftName('');
-      setActiveViewId((current) => current ?? persistedViews[0]?.id);
-      return;
-    }
-    const persisted = persistedViews.find((view) => view.id === activeViewId);
-    if (persisted) {
-      // Revert unsaved edits to the persisted snapshot.
-      setViews((prev) => upsertById(prev, persisted));
-    } else {
-      // Never saved: drop it and fall back to the first persisted view.
-      setViews((prev) => prev.filter((view) => view.id !== activeViewId));
-      setActiveViewId(persistedViews[0]?.id);
-    }
-  }, [isDraft, activeViewId, persistedViews]);
-
   return {
     views,
     activeViewId,
@@ -202,7 +180,6 @@ export const useCustomViewDefinitionState = (
     upsertViewContent,
     saveActiveView,
     deleteView,
-    resetActiveView,
   };
 };
 
